@@ -3,3 +3,4 @@
 {"question":"有哪些未完成任务？","expected_intent":"project_data_query","expected_tools":["query_project_data"]}
 {"question":"当前有哪些文档？","expected_intent":"document_query","expected_tools":["query_document"]}
 {"question":"支付服务 503 怎么排查？","expected_intent":"incident_triage","expected_tools":["query_incident_history","search_knowledge"]}
+{"question":"新成员应该先阅读哪些文档？","expected_intent":"onboarding_plan","expected_tools":["build_onboarding_plan"]}

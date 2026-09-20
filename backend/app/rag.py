@@ -77,6 +77,7 @@ def search(db: Session, query: str, top_k: int = 4, project_id: int = 1) -> list
     scored = sorted(((score_row(row), row, doc) for row, doc in rows), key=lambda item: item[0], reverse=True)
     return [
         {"chunk_id": row.chunk_id, "document_id": doc.id, "document_name": doc.name,
-         "content": row.content, "score": round(score, 4)}
+         "content": row.content, "score": round(score, 4), "source_type": doc.source_type,
+         "source_url": doc.source_url}
         for score, row, doc in scored[:top_k]
     ]

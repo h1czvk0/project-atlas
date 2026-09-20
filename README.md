@@ -2,6 +2,8 @@
 
 帮助开发者更快理解陌生代码库。
 
+当前版本：`v0.2.0`
+
 Project Atlas 将项目文档、仓库历史、Issue 和架构说明整理成可检索的项目上下文，为新成员提供一个可以自托管的上手助手。项目面向小型团队和个人维护者，默认在本地运行，项目资料不会因为使用助手而自动发送到第三方 SaaS。
 
 ## 为什么需要它
@@ -20,10 +22,11 @@ Atlas 根据项目资料回答这些问题，并展示使用到的来源文档�
 
 - 创建相互隔离的项目 Workspace。
 - 上传 Markdown、TXT、JSON 和 PDF 项目资料。
-- 将公开 GitHub 仓库的 README 导入项目 Workspace。
+- 将公开 GitHub 仓库的 README、最近 Commit 和 Issue 导入项目 Workspace。
 - 对文档进行分块、轻量向量化和混合检索。
 - 基于项目证据回答问题，并展示来源片段。
 - 根据项目上下文生成新成员上手路径。
+- 在页面创建和切换项目，并同步关联的公开 GitHub 仓库。
 - 通过只读工具查询项目任务和未关闭故障。
 - 通过 SSE 返回 Agent 工具调用事件。
 - 支持 SQLite 本地运行，也支持 Docker Compose + MySQL。
@@ -86,7 +89,10 @@ npm run dev
 LLM_BASE_URL=https://your-provider.example/v1
 LLM_API_KEY=your-key
 LLM_MODEL=your-model
+GITHUB_TOKEN=your-optional-github-token
 ```
+
+`GITHUB_TOKEN` 不是必填项。同步公开仓库时可以匿名访问 GitHub API；如果遇到请求次数限制，可以配置只读 Token 提高限额。真实 Token 只放在本地 `.env`，不要提交到仓库。
 
 ## 主要接口
 
@@ -95,6 +101,7 @@ LLM_MODEL=your-model
 | GET | `/api/projects` | 获取项目 Workspace 列表 |
 | POST | `/api/projects` | 创建项目 Workspace |
 | POST | `/api/projects/{id}/sync-readme` | 导入公开 GitHub README |
+| POST | `/api/projects/{id}/sync-context` | 导入公开 GitHub README、Commit 和 Issue |
 | POST | `/api/documents/upload` | 上传并索引项目资料 |
 | GET | `/api/documents?project_id=1` | 获取某个项目的资料 |
 | POST | `/api/chat` | 向 Agent 提问 |
@@ -108,7 +115,8 @@ Vue 3 → FastAPI API → 项目 Workspace
                          ├─ search_knowledge → 混合检索
                          ├─ query_project_data → 项目任务
                          ├─ query_incident_history → 未关闭故障
-                         └─ sync_readme → GitHub 公共 API
+                         ├─ build_onboarding_plan → 新人上手路径
+                         └─ sync_context → GitHub 公共 API
                                       ↓
                          OpenAI-compatible API（可选）
 ```
@@ -125,13 +133,23 @@ cd ..\frontend
 npm run build
 ```
 
+运行离线 Agent 评测：
+
+```powershell
+Set-Location backend
+$env:PYTHONPATH='.'
+..\.venv\Scripts\python.exe scripts\evaluate.py
+```
+
 ## 后续计划
 
-- [x] 项目 Workspace 和基于来源的问答
-- [x] 导入公开 GitHub README
+- [x] 项目 Workspace、切换和基于来源的问答
+- [x] 导入公开 GitHub README、Commit 和 Issue
 - [x] 项目任务和故障只读查询工具
-- [ ] 导入 Git commit 和 Issue
-- [ ] 使用 LangGraph 表达新人上手流程
+- [x] 新成员上手路径工具
+- [x] SSE 增量回答和 Markdown 渲染
+- [x] 后端评测脚本和前后端 CI
+- [ ] 使用 LangGraph 表达复杂条件工作流
 - [ ] 接入 Qdrant 或托管 embedding 服务
 - [ ] 增加浏览器扩展，用于保存项目上下文
 

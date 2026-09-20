@@ -7,6 +7,7 @@
 | GET | `/api/projects` | 获取项目工作区列表 |
 | POST | `/api/projects` | 创建项目工作区 |
 | POST | `/api/projects/{id}/sync-readme` | 导入公开 GitHub README |
+| POST | `/api/projects/{id}/sync-context` | 导入 README、最近 Commit 和 Issue |
 | POST | `/api/documents/upload` | 上传并索引项目资料 |
 | GET | `/api/documents?project_id=1` | 获取某个项目的资料 |
 | POST | `/api/documents/{id}/reindex` | 重新建立索引 |

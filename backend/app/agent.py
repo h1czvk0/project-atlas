@@ -9,8 +9,8 @@ def _record_tool(db: Session, name: str, args: dict, output: dict, session_id: i
     db.add(ToolCall(session_id=session_id, tool_name=name, input_json=args, output_json=output))
 
 
-def query_document(db: Session, keyword: str) -> list[dict]:
-    docs = db.query(Document).filter(Document.name.ilike(f"%{keyword}%")).all()
+def query_document(db: Session, keyword: str, project_id: int = 1) -> list[dict]:
+    docs = db.query(Document).filter(Document.project_id == project_id, Document.name.ilike(f"%{keyword}%")).all()
     return [{"id": doc.id, "name": doc.name, "status": doc.status, "chunks": doc.chunk_count} for doc in docs]
 
 
@@ -22,19 +22,28 @@ def summarize_content(text: str) -> str:
 def _source_markdown(hits: list[dict]) -> str:
     if not hits:
         return "- 暂无匹配的项目资料。"
-    return "\n".join(
-        f"- **{hit['document_name']}**：{hit['content'].strip()[:180]}"
-        for hit in hits[:3]
-    )
+    lines = []
+    for hit in hits[:3]:
+        name = hit["document_name"]
+        label = f"[{name}]({hit['source_url']})" if hit.get("source_url") else f"**{name}**"
+        lines.append(f"- {label}：{hit['content'].strip()[:180]}")
+    return "\n".join(lines)
 
 
 def query_project_data(db: Session, project_id: int = 1) -> list[dict]:
-    tasks = db.query(ProjectTask).filter(ProjectTask.completed.is_(False)).order_by(ProjectTask.priority.desc()).all()
+    tasks = db.query(ProjectTask).filter(ProjectTask.project_id == project_id, ProjectTask.completed.is_(False)).order_by(ProjectTask.priority.desc()).all()
     return [{"id": task.id, "title": task.title, "priority": task.priority, "completed": task.completed} for task in tasks]
 
 
+def build_onboarding_plan(db: Session, project_id: int = 1) -> list[dict]:
+    docs = db.query(Document).filter(Document.project_id == project_id, Document.status == "ready").order_by(Document.created_at.asc()).all()
+    preferred = ("readme", "getting-started", "架构", "api", "runbook", "部署")
+    ordered = sorted(docs, key=lambda doc: (next((idx for idx, key in enumerate(preferred) if key in doc.name.lower()), len(preferred)), doc.created_at))
+    return [{"step": idx + 1, "document": doc.name, "reason": "项目入口与启动方式" if idx == 0 else "补充项目结构和运行细节"} for idx, doc in enumerate(ordered[:6])]
+
+
 def query_incident_history(db: Session, keyword: str = "", project_id: int = 1) -> list[dict]:
-    rows = db.query(Incident).filter(Incident.status == "open")
+    rows = db.query(Incident).filter(Incident.project_id == project_id, Incident.status == "open")
     if keyword:
         rows = rows.filter(Incident.symptom.ilike(f"%{keyword}%"))
     return [{"id": row.id, "title": row.title, "service": row.service, "severity": row.severity,
@@ -66,13 +75,20 @@ def _llm_answer(question: str, context: str) -> str | None:
 def run_agent(db: Session, question: str, session_id: int | None = None, project_id: int = 1) -> dict:
     lowered = question.lower()
     if any(key in lowered for key in ("有哪些文档", "文档列表", "文件列表")):
-        docs = query_document(db, "")
+        docs = query_document(db, "", project_id)
         output = {"documents": docs}
         _record_tool(db, "query_document", {"keyword": ""}, output, session_id)
         answer = "## 文档概览\n当前知识库共有 **{}** 份文档。\n\n## 文档列表\n{}".format(
             len(docs), "\n".join(f"- **{doc['name']}** · {doc['status']} · {doc['chunks']} 个片段" for doc in docs) or "- 暂无文档"
         )
         return {"answer": answer, "intent": "document_query", "used_tools": ["query_document"], "sources": [], "confidence": "structured"}
+
+    if any(key in lowered for key in ("新人", "上手", "先阅读", "了解项目", "学习顺序")):
+        plan = build_onboarding_plan(db, project_id)
+        _record_tool(db, "build_onboarding_plan", {"project_id": project_id}, {"steps": plan}, session_id)
+        lines = "\n".join(f"{item['step']}. **{item['document']}**：{item['reason']}" for item in plan) or "暂无足够项目资料，请先上传 README 或架构文档。"
+        answer = f"## 新成员上手路径\n建议按以下顺序阅读：\n\n{lines}\n\n## 使用建议\n阅读每份资料后，尝试向 Atlas 提一个具体问题，确认自己理解了项目边界。"
+        return {"answer": answer, "intent": "onboarding_plan", "used_tools": ["build_onboarding_plan"], "sources": [], "confidence": "structured" if plan else "insufficient"}
 
     if any(key in lowered for key in ("总结", "摘要", "概括")):
         hits = search(db, question, 4, project_id)

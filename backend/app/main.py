@@ -1,7 +1,5 @@
 import hashlib
 import json
-import base64
-from urllib.parse import urlparse
 from pathlib import Path
 import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -11,24 +9,28 @@ from sqlalchemy.orm import Session
 from .agent import run_agent
 from .config import settings
 from .db import Base, engine, get_db
+from .github_sync import fetch_context
+from .migrations import migrate_legacy_schema
 from .models import ChatSession, Document, Incident, Message, Project, ProjectTask
 from .rag import index_document, parse_text
 from .schemas import ChatRequest, ChatResponse, ProjectCreate, ProjectOut, SessionCreate, SessionOut
 
 Base.metadata.create_all(bind=engine)
+migrate_legacy_schema(engine)
 _seed_db = next(get_db())
-if _seed_db.query(ProjectTask).count() == 0:
-    _seed_db.add_all([
-        ProjectTask(title="补充 Agent 评测集", priority="high"),
-        ProjectTask(title="接入真实 embedding 服务", priority="medium"),
-        ProjectTask(title="完善部署截图", priority="low"),
-    ])
-    _seed_db.commit()
 if _seed_db.query(Project).count() == 0:
     _seed_db.add(Project(name="Demo Project", slug="demo-project", description="用于演示项目上下文检索和新人上手流程"))
     _seed_db.commit()
+demo_project = _seed_db.query(Project).filter_by(slug="demo-project").first()
+if demo_project and _seed_db.query(ProjectTask).filter_by(project_id=demo_project.id).count() == 0:
+    _seed_db.add_all([
+        ProjectTask(project_id=demo_project.id, title="补充 Agent 评测集", priority="high"),
+        ProjectTask(project_id=demo_project.id, title="接入真实 embedding 服务", priority="medium"),
+        ProjectTask(project_id=demo_project.id, title="完善部署截图", priority="low"),
+    ])
+    _seed_db.commit()
 _seed_db.close()
-app = FastAPI(title="Project Atlas", version="0.1.0")
+app = FastAPI(title="Project Atlas", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -68,16 +70,18 @@ def documents(project_id: int = 1, db: Session = Depends(get_db)):
 
 
 @app.get("/api/incidents")
-def incidents(db: Session = Depends(get_db)):
-    return db.query(Incident).order_by(Incident.created_at.desc()).limit(50).all()
+def incidents(project_id: int = 1, db: Session = Depends(get_db)):
+    return db.query(Incident).filter(Incident.project_id == project_id).order_by(Incident.created_at.desc()).limit(50).all()
 
 
 @app.post("/api/incidents")
 def create_incident(payload: dict, db: Session = Depends(get_db)):
-    required = {"title", "service", "symptom"}
+    required = {"title", "service", "symptom", "project_id"}
     if not required.issubset(payload):
-        raise HTTPException(422, "title、service、symptom 为必填项")
-    incident = Incident(title=payload["title"], service=payload["service"], symptom=payload["symptom"], severity=payload.get("severity", "medium"))
+        raise HTTPException(422, "project_id、title、service、symptom 为必填项")
+    if not db.get(Project, payload["project_id"]):
+        raise HTTPException(404, "项目不存在")
+    incident = Incident(project_id=payload["project_id"], title=payload["title"], service=payload["service"], symptom=payload["symptom"], severity=payload.get("severity", "medium"))
     db.add(incident)
     db.commit()
     db.refresh(incident)
@@ -102,7 +106,7 @@ async def upload_document(file: UploadFile = File(...), project_id: int = Form(1
     if len(raw) > 10 * 1024 * 1024:
         raise HTTPException(413, "文件不能超过 10MB")
     digest = hashlib.sha256(raw).hexdigest()
-    existing = db.query(Document).filter_by(sha256=digest).first()
+    existing = db.query(Document).filter_by(project_id=project_id, sha256=digest).first()
     if existing:
         raise HTTPException(409, f"文件已存在，文档 ID 为 {existing.id}")
     target = Path(settings.upload_dir) / f"{digest}{suffix}"
@@ -129,28 +133,46 @@ def sync_readme(project_id: int, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
     if not project or not project.repo_url:
         raise HTTPException(400, "项目尚未配置公开 GitHub 仓库地址")
-    parsed = urlparse(project.repo_url)
-    parts = [part for part in parsed.path.strip("/").split("/") if part]
-    if parsed.netloc != "github.com" or len(parts) < 2:
-        raise HTTPException(422, "repo_url 必须是 github.com/owner/repo")
-    owner, repo = parts[0], parts[1].removesuffix(".git")
-    response = httpx.get(f"https://api.github.com/repos/{owner}/{repo}/contents/README.md", headers={"Accept": "application/vnd.github+json"}, timeout=20)
-    if response.status_code != 200:
-        raise HTTPException(502, "无法从 GitHub 读取 README.md")
-    payload = response.json()
-    raw = base64.b64decode(payload["content"])
-    digest = hashlib.sha256(raw).hexdigest()
-    if db.query(Document).filter_by(sha256=digest).first():
-        return {"status": "unchanged", "name": "README.md"}
-    target = Path(settings.upload_dir) / f"{digest}.md"
-    target.write_bytes(raw)
-    doc = Document(name=f"{repo}-README.md", file_type=".md", sha256=digest, size_bytes=len(raw), storage_path=str(target), project_id=project_id)
-    db.add(doc)
-    db.commit()
-    db.refresh(doc)
-    count = index_document(db, doc, parse_text(doc.name, raw))
-    db.commit()
-    return {"status": "indexed", "document_id": doc.id, "chunk_count": count}
+    try:
+        items = [item for item in fetch_context(project.repo_url, limit=1) if item["kind"] == "github_readme"]
+    except (ValueError, httpx.HTTPError, KeyError, RuntimeError) as exc:
+        raise HTTPException(502, str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "无法从 GitHub 读取 README.md") from exc
+    return _index_remote_items(db, project_id, items)
+
+
+def _index_remote_items(db: Session, project_id: int, items: list[dict]) -> dict:
+    indexed = 0
+    skipped = 0
+    documents = []
+    for item in items:
+        raw = item["content"].encode("utf-8")
+        digest = hashlib.sha256(raw).hexdigest()
+        if db.query(Document).filter_by(project_id=project_id, sha256=digest).first():
+            skipped += 1
+            continue
+        target = Path(settings.upload_dir) / f"{digest}.md"
+        target.write_bytes(raw)
+        doc = Document(name=item["name"], file_type=".md", sha256=digest, size_bytes=len(raw), storage_path=str(target), project_id=project_id, source_type=item["kind"], source_url=item.get("url"))
+        db.add(doc)
+        db.commit()
+        db.refresh(doc)
+        count = index_document(db, doc, item["content"])
+        db.commit()
+        indexed += 1
+        documents.append({"id": doc.id, "name": doc.name, "chunk_count": count, "source_url": item.get("url")})
+    return {"status": "completed", "indexed": indexed, "skipped": skipped, "documents": documents}
+
+
+@app.post("/api/projects/{project_id}/sync-context")
+def sync_context(project_id: int, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project or not project.repo_url:
+        raise HTTPException(400, "项目尚未配置公开 GitHub 仓库地址")
+    try:
+        items = fetch_context(project.repo_url)
+    except (ValueError, httpx.HTTPError, KeyError, RuntimeError) as exc:
+        raise HTTPException(502, str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "无法从 GitHub 读取项目上下文") from exc
+    return _index_remote_items(db, project_id, items)
 
 
 @app.post("/api/documents/{document_id}/reindex")
@@ -203,14 +225,19 @@ def session_messages(session_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, db: Session = Depends(get_db)):
+    project_id = payload.project_id or 1
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "项目不存在")
     session = db.get(ChatSession, payload.session_id) if payload.session_id else None
+    if session and session.project_id != project_id:
+        raise HTTPException(409, "会话不属于当前项目")
     if not session:
-        session = ChatSession(title=payload.question[:30])
+        session = ChatSession(project_id=project_id, title=payload.question[:30])
         db.add(session)
         db.commit()
         db.refresh(session)
     db.add(Message(session_id=session.id, role="user", content=payload.question))
-    result = run_agent(db, payload.question, session.id, payload.project_id or 1)
+    result = run_agent(db, payload.question, session.id, project_id)
     db.add(Message(session_id=session.id, role="assistant", content=result["answer"], metadata_json=result))
     db.commit()
     return result
@@ -220,8 +247,11 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
 def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)):
     result = chat(payload, db)
     def events():
-        yield f"event: status\ndata: {json.dumps({'status': 'completed'}, ensure_ascii=False)}\n\n"
+        yield f"event: status\ndata: {json.dumps({'status': 'running'}, ensure_ascii=False)}\n\n"
         for tool in result["used_tools"]:
             yield f"event: tool\ndata: {json.dumps({'tool': tool}, ensure_ascii=False)}\n\n"
+        answer = result["answer"]
+        for offset in range(0, len(answer), 32):
+            yield f"event: delta\ndata: {json.dumps({'content': answer[offset:offset + 32]}, ensure_ascii=False)}\n\n"
         yield f"event: answer\ndata: {json.dumps(result, ensure_ascii=False)}\n\n"
     return StreamingResponse(events(), media_type="text/event-stream")
