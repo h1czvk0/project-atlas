@@ -12,11 +12,12 @@ class Settings(BaseSettings):
     github_token: str = ""
     github_clone_proxy: str = "https://gh-proxy.org"
     upload_dir: str = "./data/uploads"
+    workspace_dir: str = ""
     repository_dir: str = "./data/repositories"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 settings = Settings()
 Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-Path(settings.repository_dir).mkdir(parents=True, exist_ok=True)
+Path(settings.workspace_dir or settings.repository_dir).mkdir(parents=True, exist_ok=True)
 

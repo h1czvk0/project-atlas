@@ -1,5 +1,6 @@
 import hashlib
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 import httpx
@@ -14,7 +15,7 @@ from .github_sync import fetch_context
 from .migrations import migrate_legacy_schema
 from .models import ChatSession, Document, Incident, Message, Project, ProjectTask, ToolCall
 from .rag import index_document, parse_text
-from .repository_analyzer import RepositoryImportError, build_repository_items, copy_local_repository
+from .repository_analyzer import RepositoryImportError, build_repository_items, copy_local_repository, project_workspace_path, repository_root
 from .repository_jobs import repository_import_running, start_repository_import
 from .schemas import ChatRequest, ChatResponse, ProjectCreate, ProjectOut, ProjectUpdate, SessionCreate, SessionOut
 
@@ -33,7 +34,24 @@ if demo_project and _seed_db.query(ProjectTask).filter_by(project_id=demo_projec
     ])
     _seed_db.commit()
 _seed_db.close()
-app = FastAPI(title="Project Atlas", version="0.3.0")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    with SessionLocal() as db:
+        interrupted = db.query(Project).filter(Project.repo_status.in_(["queued", "importing"])).all()
+        project_ids = [project.id for project in interrupted if project.repo_url]
+        for project in interrupted:
+            project.repo_status = "queued"
+            project.repo_progress = 2
+            project.repo_stage = "服务重启，准备恢复导入"
+        db.commit()
+    for project_id in project_ids:
+        start_repository_import(project_id)
+    yield
+
+
+app = FastAPI(title="Project Atlas", version="0.3.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -130,12 +148,12 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     db.query(ProjectTask).filter(ProjectTask.project_id == project_id).delete(synchronize_session=False)
     for document in documents:
         db.delete(document)
+    workspace_root = repository_root()
+    repository_path = Path(project.repo_local_path).resolve() if project.repo_local_path else project_workspace_path(project_id, project.name)
     db.delete(project)
     db.commit()
 
-    repository_root = Path(settings.repository_dir).resolve()
-    repository_path = (repository_root / f"project-{project_id}").resolve()
-    if repository_root in repository_path.parents and repository_path.is_dir():
+    if workspace_root in repository_path.parents and repository_path.is_dir():
         from .repository_analyzer import _remove_tree
         _remove_tree(repository_path)
     return {"deleted": project_id}
@@ -264,7 +282,7 @@ def import_repository(project_id: int, local_path: str | None = None, db: Sessio
     project.repo_error = None
     db.commit()
     try:
-        repo_path = copy_local_repository(project_id, local_path)
+        repo_path = copy_local_repository(project_id, local_path, project.name)
         source_url = project.repo_url or repo_path.as_uri()
         items, report = build_repository_items(repo_path, source_url)
         old_documents = db.query(Document).filter(

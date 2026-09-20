@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
 from app.main import app
+from app.models import Project
+from app.db import SessionLocal
 
 
 client = TestClient(app)
@@ -90,3 +92,21 @@ def test_workspace_can_be_deleted_with_related_data():
     assert response.json() == {"deleted": project_id}
     assert all(item["id"] != project_id for item in client.get("/api/projects").json())
     assert client.get(f"/api/documents?project_id={project_id}").json() == []
+
+
+def test_busy_workspace_cannot_be_deleted(monkeypatch):
+    project = client.post("/api/projects", json={
+        "name": "Busy Project",
+        "slug": "busy-project",
+        "description": "导入中",
+        "repo_url": None,
+    })
+    project_id = project.json()["id"] if project.status_code == 201 else next(
+        item["id"] for item in client.get("/api/projects").json() if item["slug"] == "busy-project"
+    )
+    monkeypatch.setattr("app.main.repository_import_running", lambda value: value == project_id)
+    response = client.delete(f"/api/projects/{project_id}")
+    assert response.status_code == 409
+    with SessionLocal() as db:
+        db.delete(db.get(Project, project_id))
+        db.commit()

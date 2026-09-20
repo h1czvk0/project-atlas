@@ -26,7 +26,7 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_CLONE_PROXY: ${GITHUB_CLONE_PROXY:-https://gh-proxy.org}
       UPLOAD_DIR: /app/data/uploads
-      REPOSITORY_DIR: /app/data/repositories
+      WORKSPACE_DIR: /app/data/workspaces
     ports:
       - "8000:8000"
     volumes:

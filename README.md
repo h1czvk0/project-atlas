@@ -97,12 +97,14 @@ LLM_MODEL=your-model
 LLM_REASONING_EFFORT=auto
 GITHUB_TOKEN=your-optional-github-token
 GITHUB_CLONE_PROXY=https://gh-proxy.org
-REPOSITORY_DIR=./data/repositories
+WORKSPACE_DIR=E:/program/agent
 ```
 
 `GITHUB_TOKEN` 不是必填项。同步公开仓库时可以匿名访问 GitHub API；如果遇到请求次数限制，可以配置只读 Token 提高限额。真实 Token 只放在本地 `.env`，不要提交到仓库。
 
 公开仓库克隆默认按照 [GH-Proxy GitHub 加速指南](https://gh-proxy.com/docs/github-accelerator) 通过 `GITHUB_CLONE_PROXY` 加速，实际地址形如 `https://gh-proxy.org/https://github.com/owner/repo.git`。设置为空字符串可恢复 GitHub 直连。该公共代理仅用于公开仓库，不要通过它发送私有仓库凭据。
+
+`WORKSPACE_DIR` 用于指定仓库工作区的统一存放目录。Windows 的 `.env` 推荐写成 `E:/program/agent`；Atlas 会在其中按“项目名-ID”创建独立目录，例如 `E:/program/agent/slsc-2`。旧版 `REPOSITORY_DIR` 仍然兼容，但仅在未配置 `WORKSPACE_DIR` 时使用。
 
 创建 Workspace 时填写仓库地址后，Atlas 会在后台自动完成克隆、源码解析、知识索引和 GitHub 动态同步，页面会显示当前阶段和进度。模型连接不会在打开页面时自动发起；点击“测试模型”才会进行一次最小请求。
 

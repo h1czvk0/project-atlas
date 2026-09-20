@@ -40,8 +40,15 @@ def _worker(project_id: int) -> None:
                 raise RepositoryImportError("项目尚未配置公开 GitHub 仓库地址")
             repo_url = project.repo_url
 
-        _update(project_id, repo_status="importing", repo_progress=8, repo_stage="正在克隆仓库", repo_error=None)
-        repo_path = clone_repository(project_id, repo_url)
+            project_name = project.name
+
+        _update(project_id, repo_status="importing", repo_progress=8, repo_stage="正在克隆仓库（大仓库可能需要数分钟）", repo_error=None)
+
+        def report_clone_progress(percent: int) -> None:
+            mapped = 8 + round(percent * 0.24)
+            _update(project_id, repo_progress=min(mapped, 32), repo_stage=f"正在克隆仓库 · Git {percent}%")
+
+        repo_path = clone_repository(project_id, repo_url, project_name, report_clone_progress)
         _update(project_id, repo_progress=35, repo_stage="正在解析源码与配置")
         items, report = build_repository_items(repo_path, repo_url)
 

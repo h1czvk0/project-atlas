@@ -4,7 +4,7 @@ from app.rag import chunk_text, cosine, embedding
 from app.agent import _llm_payload, _source_excerpt, _source_markdown, summarize_content
 import pytest
 from app.github_sync import parse_repo_url
-from app.repository_analyzer import RepositoryImportError, _candidate_files, _git_proxy_overrides, _read_source, _symbols, clone_repository, copy_local_repository
+from app.repository_analyzer import RepositoryImportError, _candidate_files, _git_proxy_overrides, _read_source, _run_git_with_progress, _symbols, clone_repository, copy_local_repository, project_workspace_path
 
 
 def test_chunk_text_has_overlap_and_content():
@@ -90,6 +90,7 @@ def test_dead_local_git_proxy_is_disabled(monkeypatch):
 def test_clone_repository_uses_configured_accelerator(monkeypatch, tmp_path):
     commands = []
     monkeypatch.setattr("app.repository_analyzer.settings.repository_dir", str(tmp_path))
+    monkeypatch.setattr("app.repository_analyzer.settings.workspace_dir", "")
     monkeypatch.setattr("app.repository_analyzer.settings.github_clone_proxy", "https://gh-proxy.org/")
     monkeypatch.setattr("app.repository_analyzer._git_proxy_overrides", lambda: [])
 
@@ -101,3 +102,27 @@ def test_clone_repository_uses_configured_accelerator(monkeypatch, tmp_path):
     monkeypatch.setattr("app.repository_analyzer._run_git", fake_run)
     clone_repository(7, "https://github.com/h1czvk0/slsc.git")
     assert "https://gh-proxy.org/https://github.com/h1czvk0/slsc.git" in commands[0]
+
+
+def test_workspace_path_uses_configured_root_and_safe_project_name(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.repository_analyzer.settings.workspace_dir", str(tmp_path))
+    path = project_workspace_path(12, "我的 项目:Atlas")
+    assert path.parent == tmp_path.resolve()
+    assert path.name == "我的-项目-Atlas-12"
+
+
+def test_git_clone_progress_is_reported(monkeypatch):
+    class Stream:
+        def __iter__(self):
+            return iter(["Receiving objects: 25%\n", "Resolving deltas: 80%\n"])
+
+    class Process:
+        stderr = Stream()
+
+        def wait(self, timeout):
+            return 0
+
+    monkeypatch.setattr("app.repository_analyzer.subprocess.Popen", lambda *args, **kwargs: Process())
+    values = []
+    _run_git_with_progress(["clone", "repo", "target"], values.append)
+    assert values == [25, 80]

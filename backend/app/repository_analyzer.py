@@ -4,6 +4,7 @@ import re
 import shutil
 import socket
 import subprocess
+import time
 import uuid
 from collections import Counter
 from pathlib import Path
@@ -40,6 +41,7 @@ SECRET_RE = re.compile(
     r"(?i)(password|passwd|secret|api[_-]?key|access[_-]?token|private[_-]?key)"
     r"(\s*[:=]\s*)([^\s,}\]]+)"
 )
+INVALID_PATH_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 class RepositoryImportError(RuntimeError):
@@ -83,6 +85,36 @@ def _run_git(args: list[str], cwd: Path | None = None, timeout: int = 120) -> st
     return result.stdout.strip()
 
 
+def _run_git_with_progress(args: list[str], progress_callback, timeout: int = 300) -> None:
+    try:
+        process = subprocess.Popen(
+            ["git", *args], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+        )
+    except FileNotFoundError as exc:
+        raise RepositoryImportError("未找到 Git，请先安装 Git") from exc
+
+    started_at = time.monotonic()
+    details = []
+    try:
+        assert process.stderr is not None
+        for line in process.stderr:
+            details.append(line.strip())
+            match = re.search(r"(?:Receiving objects|Resolving deltas):\s+(\d+)%", line)
+            if match:
+                progress_callback(int(match.group(1)))
+            if time.monotonic() - started_at > timeout:
+                process.kill()
+                raise RepositoryImportError("克隆仓库超时")
+        return_code = process.wait(timeout=max(1, timeout - int(time.monotonic() - started_at)))
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        raise RepositoryImportError("克隆仓库超时") from exc
+    if return_code != 0:
+        detail = [line for line in details if line]
+        raise RepositoryImportError(detail[-1] if detail else "Git 克隆失败")
+
+
 def _managed_path(path: Path, root: Path) -> Path:
     resolved_root = root.resolve()
     resolved = path.resolve()
@@ -99,17 +131,45 @@ def _remove_tree(path: Path) -> None:
     shutil.rmtree(path, onexc=make_writable_and_retry)
 
 
-def clone_repository(project_id: int, repo_url: str) -> Path:
+def repository_root() -> Path:
+    return Path(settings.workspace_dir.strip() or settings.repository_dir).expanduser().resolve()
+
+
+def project_workspace_path(project_id: int, project_name: str = "") -> Path:
+    root = repository_root()
+    safe_name = INVALID_PATH_CHARS_RE.sub("-", project_name).strip(" .-")
+    safe_name = re.sub(r"\s+", "-", safe_name)[:80] or "project"
+    return _managed_path(root / f"{safe_name}-{project_id}", root)
+
+
+def _clean_staging_directories(root: Path, project_id: int) -> None:
+    patterns = (f".*-{project_id}-*.tmp", f".project-{project_id}-*.tmp")
+    paths = {path for pattern in patterns for path in root.glob(pattern)}
+    for path in paths:
+        managed = _managed_path(path, root)
+        if managed.is_dir():
+            _remove_tree(managed)
+
+
+def clone_repository(project_id: int, repo_url: str, project_name: str = "", progress_callback=None) -> Path:
     owner, repo = parse_repo_url(repo_url)
     github_url = f"https://github.com/{owner}/{repo}.git"
     proxy = settings.github_clone_proxy.strip().rstrip("/")
     clone_url = f"{proxy}/{github_url}" if proxy else github_url
-    root = Path(settings.repository_dir).resolve()
+    root = repository_root()
     root.mkdir(parents=True, exist_ok=True)
-    target = _managed_path(root / f"project-{project_id}", root)
-    staging = _managed_path(root / f".project-{project_id}-{uuid.uuid4().hex}.tmp", root)
+    target = project_workspace_path(project_id, project_name)
+    _clean_staging_directories(root, project_id)
+    legacy_root = Path(settings.repository_dir).expanduser().resolve()
+    if legacy_root != root and legacy_root.is_dir():
+        _clean_staging_directories(legacy_root, project_id)
+    staging = _managed_path(root / f".{target.name}-{uuid.uuid4().hex}.tmp", root)
     try:
-        _run_git([*_git_proxy_overrides(), "clone", "--depth", "50", "--no-tags", clone_url, str(staging)])
+        args = [*_git_proxy_overrides(), "clone", "--progress", "--depth", "50", "--no-tags", clone_url, str(staging)]
+        if progress_callback:
+            _run_git_with_progress(args, progress_callback)
+        else:
+            _run_git(args)
         if target.exists():
             _remove_tree(target)
         staging.replace(target)
@@ -120,14 +180,15 @@ def clone_repository(project_id: int, repo_url: str) -> Path:
     return target
 
 
-def copy_local_repository(project_id: int, source_path: str) -> Path:
+def copy_local_repository(project_id: int, source_path: str, project_name: str = "") -> Path:
     source = Path(source_path).expanduser().resolve()
     if not source.is_dir() or not (source / ".git").exists():
         raise RepositoryImportError("本地路径必须指向一个 Git 仓库目录")
-    root = Path(settings.repository_dir).resolve()
+    root = repository_root()
     root.mkdir(parents=True, exist_ok=True)
-    target = _managed_path(root / f"project-{project_id}", root)
-    staging = _managed_path(root / f".project-{project_id}-{uuid.uuid4().hex}.tmp", root)
+    target = project_workspace_path(project_id, project_name)
+    _clean_staging_directories(root, project_id)
+    staging = _managed_path(root / f".{target.name}-{uuid.uuid4().hex}.tmp", root)
     try:
         _run_git(["clone", "--no-hardlinks", "--no-tags", str(source), str(staging)])
         if target.exists():
