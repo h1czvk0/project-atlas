@@ -46,12 +46,22 @@ Atlas 返回结构化上手路径
 
 ## 快速启动
 
-```bash
-cp .env.example .env
+请先进入项目目录。不要在 `C:\Users\hiczvko` 目录直接执行下面的命令。
+
+```powershell
+Set-Location E:\program\project-atlas
+Copy-Item .env.example .env
+```
+
+如果 Docker Desktop 正在运行，可以直接启动完整服务：
+
+```powershell
 docker compose up --build
 ```
 
 打开 http://localhost:5173，然后上传 `data/examples/getting-started.md` 或 `data/examples/payment-service-runbook.md`。
+
+如果暂时不使用 Docker，也可以分别启动后端和前端。先打开一个 PowerShell 窗口启动后端：
 
 Windows 本地启动后端：
 
@@ -61,6 +71,15 @@ cd backend
 $env:PYTHONPATH='.'
 ..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
+
+再打开第二个 PowerShell 窗口启动前端：
+
+```powershell
+Set-Location E:\program\project-atlas\frontend
+npm run dev
+```
+
+本地启动时访问 http://localhost:5173。默认使用 SQLite，不需要配置大模型 API Key 也可以体验文档索引和检索问答。
 
 ## 配置真实大模型
 
@@ -126,4 +145,3 @@ npm run build
 ## 开源许可
 
 MIT License
-
