@@ -66,10 +66,9 @@ docker compose up --build
 Windows 本地启动后端：
 
 ```powershell
-cd backend
-..\.venv\Scripts\python.exe -m pip install -r requirements.txt
-$env:PYTHONPATH='.'
-..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+Set-Location E:\program\project-atlas
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --reload
 ```
 
 再打开第二个 PowerShell 窗口启动前端：
