@@ -46,10 +46,9 @@ Atlas 返回结构化上手路径
 
 ## 快速启动
 
-请先进入项目目录。不要在 `C:\Users\hiczvko` 目录直接执行下面的命令。
+以下命令请在仓库根目录执行。
 
 ```powershell
-Set-Location E:\program\project-atlas
 Copy-Item .env.example .env
 ```
 
@@ -66,7 +65,6 @@ docker compose up --build
 Windows 本地启动后端：
 
 ```powershell
-Set-Location E:\program\project-atlas
 .\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --reload
 ```
@@ -74,7 +72,7 @@ Set-Location E:\program\project-atlas
 再打开第二个 PowerShell 窗口启动前端：
 
 ```powershell
-Set-Location E:\program\project-atlas\frontend
+Set-Location frontend
 npm run dev
 ```
 
