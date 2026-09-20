@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 const API = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api'
@@ -35,7 +35,7 @@ async function ask(){
   const q=question.value
   question.value=''
   messages.value.push({role:'user',content:q})
-  const reply={role:'assistant',content:'',meta:null,tools:[],stages:[]}
+  const reply=reactive({role:'assistant',content:'',meta:null,tools:[],stages:[]})
   messages.value.push(reply)
   loading.value=true
   try{
