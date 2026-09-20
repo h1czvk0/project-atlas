@@ -1,59 +1,59 @@
 # Project Atlas
 
-Understand unfamiliar codebases faster.
+帮助开发者更快理解陌生代码库。
 
-Project Atlas turns project documentation, repository history, issues and architecture notes into a searchable project context for developers joining an unfamiliar codebase. It is designed for small teams and individual maintainers who want a reliable onboarding companion without sending their whole project to a third-party SaaS.
+Project Atlas 将项目文档、仓库历史、Issue 和架构说明整理成可检索的项目上下文，为新成员提供一个可以自托管的上手助手。项目面向小型团队和个人维护者，默认在本地运行，项目资料不会因为使用助手而自动发送到第三方 SaaS。
 
-## Why this exists
+## 为什么需要它
 
-When a developer joins a project, the difficult questions are usually not syntax questions:
+开发者加入一个陌生项目时，最难的问题通常不是语法问题：
 
-- How do I start the project locally?
-- Which module owns authentication or payments?
-- Why was this dependency changed?
-- What is still unresolved?
-- Which documents should I read first?
+- 项目如何在本地启动？
+- 登录或支付功能由哪个模块负责？
+- 为什么要修改这个依赖？
+- 目前还有哪些问题没有解决？
+- 新成员应该先读哪些文档？
 
-Atlas answers these questions from project evidence and always shows the source document or repository context it used.
+Atlas 根据项目资料回答这些问题，并展示使用到的来源文档或仓库上下文。
 
-## What it does
+## 当前功能
 
-- Create isolated project workspaces.
-- Upload Markdown, TXT, JSON and PDF project documents.
-- Import a public GitHub repository README into a workspace.
-- Index documents with chunking, lightweight embeddings and hybrid retrieval.
-- Ask grounded questions with source snippets.
-- Generate a new-member onboarding path from project context.
-- Query project tasks and open incidents through read-only tools.
-- Stream Agent tool events over SSE.
-- Run locally with SQLite or Docker Compose + MySQL.
+- 创建相互隔离的项目 Workspace。
+- 上传 Markdown、TXT、JSON 和 PDF 项目资料。
+- 将公开 GitHub 仓库的 README 导入项目 Workspace。
+- 对文档进行分块、轻量向量化和混合检索。
+- 基于项目证据回答问题，并展示来源片段。
+- 根据项目上下文生成新成员上手路径。
+- 通过只读工具查询项目任务和未关闭故障。
+- 通过 SSE 返回 Agent 工具调用事件。
+- 支持 SQLite 本地运行，也支持 Docker Compose + MySQL。
 
-## Example workflow
+## 使用流程示例
 
 ```text
-Create a project workspace
+创建项目 Workspace
         ↓
-Import README / upload architecture notes / runbooks
+导入 README / 上传架构说明 / 上传 Runbook
         ↓
-Ask: “How do I start this project?”
+提问：“项目如何启动？”
         ↓
-Atlas retrieves evidence and cites the source
+Atlas 检索证据并标注来源
         ↓
-Ask: “What should a new developer read first?”
+提问：“新成员应该先阅读哪些文档？”
         ↓
-Atlas returns a structured onboarding path
+Atlas 返回结构化上手路径
 ```
 
-## Quick start
+## 快速启动
 
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-Open http://localhost:5173 and upload `data/examples/getting-started.md` or `data/examples/payment-service-runbook.md`.
+打开 http://localhost:5173，然后上传 `data/examples/getting-started.md` 或 `data/examples/payment-service-runbook.md`。
 
-For local backend development on Windows:
+Windows 本地启动后端：
 
 ```powershell
 cd backend
@@ -62,9 +62,9 @@ $env:PYTHONPATH='.'
 ..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-## Optional model provider
+## 配置真实大模型
 
-Atlas works without an API key by returning explainable retrieval results. To enable a real OpenAI-compatible model, put these values in `.env`:
+不配置 API Key 时，Atlas 仍然可以返回可解释的检索结果。需要使用真实的 OpenAI-compatible 模型时，在 `.env` 中填写：
 
 ```text
 LLM_BASE_URL=https://your-provider.example/v1
@@ -72,34 +72,34 @@ LLM_API_KEY=your-key
 LLM_MODEL=your-model
 ```
 
-## API highlights
+## 主要接口
 
-| Method | Path | Purpose |
+| 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/api/projects` | List workspaces |
-| POST | `/api/projects` | Create a workspace |
-| POST | `/api/projects/{id}/sync-readme` | Import a public GitHub README |
-| POST | `/api/documents/upload` | Upload and index a document |
-| GET | `/api/documents?project_id=1` | List project documents |
-| POST | `/api/chat` | Ask the Agent |
-| POST | `/api/chat/stream` | Receive SSE tool events |
+| GET | `/api/projects` | 获取项目 Workspace 列表 |
+| POST | `/api/projects` | 创建项目 Workspace |
+| POST | `/api/projects/{id}/sync-readme` | 导入公开 GitHub README |
+| POST | `/api/documents/upload` | 上传并索引项目资料 |
+| GET | `/api/documents?project_id=1` | 获取某个项目的资料 |
+| POST | `/api/chat` | 向 Agent 提问 |
+| POST | `/api/chat/stream` | 获取 SSE 工具事件 |
 
-## Architecture
+## 系统架构
 
 ```text
-Vue 3 → FastAPI API → Project Workspace
-                         ├─ documents + chunks → MySQL / SQLite
-                         ├─ search_knowledge → hybrid retrieval
-                         ├─ query_project_data → project tasks
-                         ├─ query_incident_history → open incidents
-                         └─ sync_readme → GitHub public API
+Vue 3 → FastAPI API → 项目 Workspace
+                         ├─ 文档和分块 → MySQL / SQLite
+                         ├─ search_knowledge → 混合检索
+                         ├─ query_project_data → 项目任务
+                         ├─ query_incident_history → 未关闭故障
+                         └─ sync_readme → GitHub 公共 API
                                       ↓
-                         OpenAI-compatible API (optional)
+                         OpenAI-compatible API（可选）
 ```
 
-See [docs/architecture.md](docs/architecture.md) and [docs/api.md](docs/api.md) for details.
+详细说明见 [架构说明](docs/architecture.md) 和 [接口说明](docs/api.md)。
 
-## Development checks
+## 开发检查
 
 ```powershell
 cd backend
@@ -109,21 +109,21 @@ cd ..\frontend
 npm run build
 ```
 
-## Roadmap
+## 后续计划
 
-- [x] Project workspaces and source-grounded Q&A
-- [x] Public GitHub README import
-- [x] Task and incident read-only tools
-- [ ] Import commit history and Issues
-- [ ] LangGraph onboarding workflow
-- [ ] Qdrant / hosted embedding provider
-- [ ] Browser extension for saving project context
+- [x] 项目 Workspace 和基于来源的问答
+- [x] 导入公开 GitHub README
+- [x] 项目任务和故障只读查询工具
+- [ ] 导入 Git commit 和 Issue
+- [ ] 使用 LangGraph 表达新人上手流程
+- [ ] 接入 Qdrant 或托管 embedding 服务
+- [ ] 增加浏览器扩展，用于保存项目上下文
 
-## Limitations
+## 当前限制
 
-This is a local-first open-source project, not a production code intelligence platform. The default embedding implementation is intentionally lightweight and reproducible. It does not claim production accuracy, user counts or enterprise SLA.
+这是一个本地优先的开源项目，不是生产级代码智能平台。默认 embedding 实现强调轻量和可复现，暂不宣称生产环境准确率、用户数量或企业级 SLA。
 
-## License
+## 开源许可
 
-MIT
+MIT License
 
