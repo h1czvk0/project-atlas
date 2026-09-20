@@ -2,6 +2,7 @@ from datetime import datetime
 from threading import Lock, Thread
 
 from .db import SessionLocal
+from .document_storage import cleanup_unreferenced_files
 from .github_sync import fetch_context
 from .models import Document, Project
 from .repository_analyzer import RepositoryImportError, build_repository_items, clone_repository
@@ -59,9 +60,11 @@ def _worker(project_id: int) -> None:
                 Document.project_id == project_id,
                 Document.source_type.like("repository_%"),
             ).all()
+            storage_paths = [document.storage_path for document in old_documents]
             for document in old_documents:
                 db.delete(document)
             db.commit()
+            cleanup_unreferenced_files(db, storage_paths)
             _index_remote_items(db, project_id, items)
 
         _update(project_id, repo_progress=88, repo_stage="正在同步 README、Commit 与 Issue")

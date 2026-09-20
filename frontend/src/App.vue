@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 const API = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api'
-const projects = ref([]), projectId = ref(1), docs = ref([]), systemStatus = ref({llm_configured:false,llm_reachable:null,llm_model:null,llm_message:'点击测试连接'}), question = ref(''), messages = ref([]), loading = ref(false), testingModel = ref(false), fileInput = ref(null), newProject = ref({name:'',repo_url:''}), repositoryUrl = ref(''), reasoningEffort = ref('auto')
+const projects = ref([]), projectId = ref(1), docs = ref([]), sessionId = ref(null), systemStatus = ref({llm_configured:false,llm_reachable:null,llm_model:null,llm_message:'点击测试连接'}), question = ref(''), messages = ref([]), loading = ref(false), testingModel = ref(false), fileInput = ref(null), newProject = ref({name:'',repo_url:''}), repositoryUrl = ref(''), reasoningEffort = ref('auto')
 let projectPoller = null
 const activeProject = ()=>projects.value.find(project=>project.id===projectId.value)
 const isImporting = ()=>['queued','importing'].includes(activeProject()?.repo_status)
@@ -17,7 +17,7 @@ async function loadProjects(){ projects.value = await fetch(`${API}/projects`).t
 async function loadDocs(){ docs.value = await fetch(`${API}/documents?project_id=${projectId.value}`).then(r=>r.json()) }
 async function loadSystemStatus(check=false){ systemStatus.value = await fetch(`${API}/system/status?check=${check}`).then(r=>r.json()); if(systemStatus.value.llm_reasoning_effort) reasoningEffort.value=systemStatus.value.llm_reasoning_effort }
 async function testModel(){ testingModel.value=true; await loadSystemStatus(true); testingModel.value=false }
-async function changeProject(){ messages.value=[]; repositoryUrl.value=activeProject()?.repo_url||''; await loadDocs() }
+async function changeProject(){ messages.value=[]; sessionId.value=null; repositoryUrl.value=activeProject()?.repo_url||''; await loadDocs() }
 async function createProject(){ const name=newProject.value.name.trim(); if(!name) return; const slug=`${name.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g,'-')}-${Date.now().toString().slice(-5)}`; const r=await fetch(`${API}/projects`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,slug,repo_url:newProject.value.repo_url.trim()||null})}); const d=await r.json(); if(!r.ok){alert(d.detail);return} newProject.value={name:'',repo_url:''}; await loadProjects(); projectId.value=d.id; await changeProject() }
 async function deleteProject(){ const project=activeProject(); if(!project||isImporting()) return; if(!confirm(`确定删除工作区“${project.name}”？\n\n关联文档、对话、索引和本地仓库快照会一并删除，此操作无法撤销。`)) return; const r=await fetch(`${API}/projects/${project.id}`,{method:'DELETE'}); const d=await r.json(); if(!r.ok){alert(d.detail);return} messages.value=[]; await loadProjects(); if(projects.value.length){ projectId.value=projects.value[0].id; await changeProject() } else { docs.value=[]; repositoryUrl.value='' } }
 async function importRepository(){ const r=await fetch(`${API}/projects/${projectId.value}/import-repository`,{method:'POST'}); const d=await r.json(); if(!r.ok) alert(d.detail); await loadProjects() }
@@ -33,7 +33,7 @@ async function ask(){
   messages.value.push(reply)
   loading.value=true
   try{
-    const response=await fetch(`${API}/chat/stream`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,project_id:projectId.value,reasoning_effort:reasoningEffort.value})})
+    const response=await fetch(`${API}/chat/stream`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,project_id:projectId.value,session_id:sessionId.value,reasoning_effort:reasoningEffort.value})})
     if(!response.ok||!response.body) throw new Error('请求失败')
     const reader=response.body.getReader(), decoder=new TextDecoder('utf-8')
     let buffer=''
@@ -48,9 +48,11 @@ async function ask(){
         const raw=block.match(/^data: (.+)$/m)?.[1]
         if(!event||!raw) continue
         const data=JSON.parse(raw)
+        if(event==='status'&&data.session_id) sessionId.value=data.session_id
         if(event==='delta') reply.content+=data.content
         if(event==='tool') reply.tools.push(data.tool)
-        if(event==='answer'){ reply.meta=data; if(!reply.content) reply.content=data.answer }
+        if(event==='answer'){ reply.meta=data; sessionId.value=data.session_id||sessionId.value; reply.content=data.answer }
+        if(event==='error') throw new Error(data.message||'请求失败')
       }
     }
   }catch(error){ reply.content='## 请求失败\n无法连接后端服务，请确认 API 已启动后重试。' }

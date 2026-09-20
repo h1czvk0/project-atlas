@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.rag import chunk_text, cosine, embedding
-from app.agent import _llm_payload, _source_excerpt, _source_markdown, summarize_content
+from app.agent import _llm_answer, _llm_payload, _source_excerpt, _source_markdown, summarize_content
 import pytest
 from app.github_sync import parse_repo_url
 from app.repository_analyzer import RepositoryImportError, _candidate_files, _git_proxy_overrides, _read_source, _run_git_with_progress, _symbols, clone_repository, copy_local_repository, project_workspace_path
@@ -76,6 +76,42 @@ def test_reasoning_effort_is_optional_in_llm_payload():
     high = _llm_payload("问题", "上下文", "high")
     assert "reasoning_effort" not in automatic
     assert high["reasoning_effort"] == "high"
+
+
+def test_llm_payload_includes_recent_conversation_history():
+    history = [{"role": "user", "content": f"问题 {index}"} for index in range(8)]
+    payload = _llm_payload("继续", "上下文", "auto", history)
+    assert len(payload["messages"]) == 7
+    assert payload["messages"][0]["content"] == "问题 2"
+    assert payload["messages"][-1]["content"].endswith("问题：继续")
+
+
+def test_llm_answer_forwards_stream_deltas(monkeypatch):
+    class Response:
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"你"}}]}'
+            yield 'data: {"choices":[{"delta":{"content":"好"}}]}'
+            yield 'data: {"choices":[],"usage":{"total_tokens":12}}'
+            yield "data: [DONE]"
+
+    monkeypatch.setattr("app.agent.settings.llm_base_url", "https://example.test/v1")
+    monkeypatch.setattr("app.agent.settings.llm_api_key", "test-key")
+    monkeypatch.setattr("app.agent.httpx.stream", lambda *args, **kwargs: Response())
+    deltas = []
+    answer = _llm_answer("问题", "上下文", "auto", [], deltas.append)
+    assert answer == "你好"
+    assert deltas == ["你", "好"]
 
 
 def test_dead_local_git_proxy_is_disabled(monkeypatch):

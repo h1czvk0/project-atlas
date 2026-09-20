@@ -1,6 +1,10 @@
+import json
+from pathlib import Path
+from uuid import uuid4
+
 from fastapi.testclient import TestClient
 from app.main import app
-from app.models import Project
+from app.models import Document, Project
 from app.db import SessionLocal
 
 
@@ -33,6 +37,20 @@ def test_project_workspace_document_and_stream_flow():
     assert stream.status_code == 200
     assert "event: delta" in stream.text
     assert "event: answer" in stream.text
+    status_payload = next(
+        line.removeprefix("data: ") for line in stream.text.splitlines()
+        if line.startswith("data: ") and '"session_id"' in line
+    )
+    session_id = json.loads(status_payload)["session_id"]
+    follow_up = client.post("/api/chat/stream", json={
+        "question": "有哪些文档？",
+        "project_id": project_id,
+        "session_id": session_id,
+    })
+    assert follow_up.status_code == 200
+    assert f'"session_id": {session_id}' in follow_up.text
+    messages = client.get(f"/api/sessions/{session_id}/messages").json()
+    assert [message["role"] for message in messages[-4:]] == ["user", "assistant", "user", "assistant"]
 
 
 def test_incidents_are_isolated_by_project():
@@ -110,3 +128,39 @@ def test_busy_workspace_cannot_be_deleted(monkeypatch):
     with SessionLocal() as db:
         db.delete(db.get(Project, project_id))
         db.commit()
+
+
+def test_same_file_is_isolated_between_workspaces(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.document_storage.settings.upload_dir", str(tmp_path))
+    token = uuid4().hex[:8]
+    project_ids = []
+    document_ids = []
+    storage_paths = []
+    for index in range(2):
+        project = client.post("/api/projects", json={
+            "name": f"Storage Project {index}",
+            "slug": f"storage-project-{token}-{index}",
+            "description": "存储隔离测试",
+            "repo_url": None,
+        })
+        assert project.status_code == 201
+        project_id = project.json()["id"]
+        project_ids.append(project_id)
+        upload = client.post(
+            "/api/documents/upload",
+            data={"project_id": project_id},
+            files={"file": ("shared.md", b"same content in two workspaces", "text/markdown")},
+        )
+        assert upload.status_code in (200, 409)
+        with SessionLocal() as db:
+            document = db.query(Document).filter_by(project_id=project_id, name="shared.md").first()
+            document_ids.append(document.id)
+            storage_paths.append(document.storage_path)
+
+    assert storage_paths[0] != storage_paths[1]
+    assert all(Path(path).is_file() for path in storage_paths)
+    assert client.delete(f"/api/projects/{project_ids[0]}").status_code == 200
+    assert not Path(storage_paths[0]).exists()
+    assert Path(storage_paths[1]).is_file()
+    assert client.post(f"/api/documents/{document_ids[1]}/reindex").status_code == 200
+    assert client.delete(f"/api/projects/{project_ids[1]}").status_code == 200

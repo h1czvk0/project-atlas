@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class SessionCreate(BaseModel):
     title: str = "新会话"
+    project_id: int = 1
 
 
 class ProjectCreate(BaseModel):
@@ -44,10 +45,12 @@ class ChatResponse(BaseModel):
     used_tools: list[str]
     sources: list[dict]
     confidence: str
+    session_id: int | None = None
 
 
 class SessionOut(BaseModel):
     id: int
+    project_id: int
     title: str
     created_at: datetime
 

@@ -1,5 +1,6 @@
-import hashlib
 import json
+from queue import Queue
+from threading import Thread
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from .agent import check_llm_connection, run_agent
 from .config import settings
 from .db import Base, SessionLocal, engine, get_db
+from .document_storage import cleanup_unreferenced_files, project_content_digest, write_project_file
 from .github_sync import fetch_context
 from .migrations import migrate_legacy_schema
 from .models import ChatSession, Document, Incident, Message, Project, ProjectTask, ToolCall
@@ -130,13 +132,7 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
         raise HTTPException(409, "仓库正在导入，请等待完成后再删除工作区")
 
     documents = db.query(Document).filter(Document.project_id == project_id).all()
-    upload_root = Path(settings.upload_dir).resolve()
-    for document in documents:
-        if not document.storage_path:
-            continue
-        path = Path(document.storage_path).resolve()
-        if path.is_file() and path.parent == upload_root:
-            path.unlink(missing_ok=True)
+    storage_paths = [document.storage_path for document in documents]
 
     sessions = db.query(ChatSession).filter(ChatSession.project_id == project_id).all()
     session_ids = [session.id for session in sessions]
@@ -152,6 +148,7 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     repository_path = Path(project.repo_local_path).resolve() if project.repo_local_path else project_workspace_path(project_id, project.name)
     db.delete(project)
     db.commit()
+    cleanup_unreferenced_files(db, storage_paths)
 
     if workspace_root in repository_path.parents and repository_path.is_dir():
         from .repository_analyzer import _remove_tree
@@ -200,14 +197,13 @@ async def upload_document(file: UploadFile = File(...), project_id: int = Form(1
     raw = await file.read()
     if len(raw) > 10 * 1024 * 1024:
         raise HTTPException(413, "文件不能超过 10MB")
-    digest = hashlib.sha256(raw).hexdigest()
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "项目不存在")
+    digest = project_content_digest(project_id, raw)
     existing = db.query(Document).filter_by(project_id=project_id, sha256=digest).first()
     if existing:
         raise HTTPException(409, f"文件已存在，文档 ID 为 {existing.id}")
-    target = Path(settings.upload_dir) / f"{digest}{suffix}"
-    target.write_bytes(raw)
-    if not db.get(Project, project_id):
-        raise HTTPException(404, "项目不存在")
+    target = write_project_file(project_id, digest, suffix, raw)
     doc = Document(name=file.filename or "unnamed", file_type=suffix, sha256=digest, size_bytes=len(raw), storage_path=str(target), project_id=project_id)
     db.add(doc)
     db.commit()
@@ -241,12 +237,11 @@ def _index_remote_items(db: Session, project_id: int, items: list[dict]) -> dict
     documents = []
     for item in items:
         raw = item["content"].encode("utf-8")
-        digest = hashlib.sha256(raw).hexdigest()
+        digest = project_content_digest(project_id, raw)
         if db.query(Document).filter_by(project_id=project_id, sha256=digest).first():
             skipped += 1
             continue
-        target = Path(settings.upload_dir) / f"{digest}.md"
-        target.write_bytes(raw)
+        target = write_project_file(project_id, digest, ".md", raw)
         doc = Document(name=item["name"], file_type=".md", sha256=digest, size_bytes=len(raw), storage_path=str(target), project_id=project_id, source_type=item["kind"], source_url=item.get("url"))
         db.add(doc)
         db.commit()
@@ -289,9 +284,11 @@ def import_repository(project_id: int, local_path: str | None = None, db: Sessio
             Document.project_id == project_id,
             Document.source_type.like("repository_%"),
         ).all()
+        storage_paths = [document.storage_path for document in old_documents]
         for document in old_documents:
             db.delete(document)
         db.commit()
+        cleanup_unreferenced_files(db, storage_paths)
         result = _index_remote_items(db, project_id, items)
         project = db.get(Project, project_id)
         project.repo_status = "ready"
@@ -349,14 +346,18 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
     doc = db.get(Document, document_id)
     if not doc:
         raise HTTPException(404, "文档不存在")
+    storage_path = doc.storage_path
     db.delete(doc)
     db.commit()
+    cleanup_unreferenced_files(db, [storage_path])
     return {"deleted": document_id}
 
 
 @app.post("/api/sessions", response_model=SessionOut)
 def create_session(payload: SessionCreate, db: Session = Depends(get_db)):
-    session = ChatSession(title=payload.title)
+    if not db.get(Project, payload.project_id):
+        raise HTTPException(404, "项目不存在")
+    session = ChatSession(project_id=payload.project_id, title=payload.title)
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -364,8 +365,11 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/api/sessions", response_model=list[SessionOut])
-def list_sessions(db: Session = Depends(get_db)):
-    return db.query(ChatSession).order_by(ChatSession.created_at.desc()).all()
+def list_sessions(project_id: int | None = None, db: Session = Depends(get_db)):
+    query = db.query(ChatSession)
+    if project_id is not None:
+        query = query.filter(ChatSession.project_id == project_id)
+    return query.order_by(ChatSession.created_at.desc()).all()
 
 
 @app.get("/api/sessions/{session_id}/messages")
@@ -388,8 +392,11 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         db.add(session)
         db.commit()
         db.refresh(session)
+    history_rows = db.query(Message).filter_by(session_id=session.id).order_by(Message.created_at.desc()).limit(6).all()
+    history = [{"role": row.role, "content": row.content} for row in reversed(history_rows)]
     db.add(Message(session_id=session.id, role="user", content=payload.question))
-    result = run_agent(db, payload.question, session.id, project_id, payload.reasoning_effort)
+    result = run_agent(db, payload.question, session.id, project_id, payload.reasoning_effort, history)
+    result["session_id"] = session.id
     db.add(Message(session_id=session.id, role="assistant", content=result["answer"], metadata_json=result))
     db.commit()
     return result
@@ -397,13 +404,55 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
 
 @app.post("/api/chat/stream")
 def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)):
-    result = chat(payload, db)
+    project_id = payload.project_id or 1
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "项目不存在")
+    session = db.get(ChatSession, payload.session_id) if payload.session_id else None
+    if session and session.project_id != project_id:
+        raise HTTPException(409, "会话不属于当前项目")
+    if not session:
+        session = ChatSession(project_id=project_id, title=payload.question[:30])
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+    session_id = session.id
+
     def events():
-        yield f"event: status\ndata: {json.dumps({'status': 'running'}, ensure_ascii=False)}\n\n"
-        for tool in result["used_tools"]:
-            yield f"event: tool\ndata: {json.dumps({'tool': tool}, ensure_ascii=False)}\n\n"
-        answer = result["answer"]
-        for offset in range(0, len(answer), 32):
-            yield f"event: delta\ndata: {json.dumps({'content': answer[offset:offset + 32]}, ensure_ascii=False)}\n\n"
-        yield f"event: answer\ndata: {json.dumps(result, ensure_ascii=False)}\n\n"
+        queue: Queue = Queue()
+
+        def worker():
+            try:
+                with SessionLocal() as worker_db:
+                    history_rows = worker_db.query(Message).filter_by(session_id=session_id).order_by(Message.created_at.desc()).limit(6).all()
+                    history = [{"role": row.role, "content": row.content} for row in reversed(history_rows)]
+                    worker_db.add(Message(session_id=session_id, role="user", content=payload.question))
+                    result = run_agent(
+                        worker_db, payload.question, session_id, project_id,
+                        payload.reasoning_effort, history,
+                        lambda content: queue.put(("delta", {"content": content})),
+                    )
+                    result["session_id"] = session_id
+                    worker_db.add(Message(session_id=session_id, role="assistant", content=result["answer"], metadata_json=result))
+                    worker_db.commit()
+                    queue.put(("answer", result))
+            except Exception as exc:
+                queue.put(("error", {"message": str(exc)[:500]}))
+            finally:
+                queue.put(("done", None))
+
+        Thread(target=worker, daemon=True, name=f"atlas-chat-{session_id}").start()
+        yield f"event: status\ndata: {json.dumps({'status': 'running', 'session_id': session_id}, ensure_ascii=False)}\n\n"
+        streamed = False
+        while True:
+            event, data = queue.get()
+            if event == "done":
+                break
+            if event == "delta":
+                streamed = True
+            if event == "answer":
+                for tool in data["used_tools"]:
+                    yield f"event: tool\ndata: {json.dumps({'tool': tool}, ensure_ascii=False)}\n\n"
+                if not streamed:
+                    yield f"event: delta\ndata: {json.dumps({'content': data['answer']}, ensure_ascii=False)}\n\n"
+            yield f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
     return StreamingResponse(events(), media_type="text/event-stream")
