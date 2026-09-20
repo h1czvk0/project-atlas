@@ -7,6 +7,8 @@ FastAPI 应用
       ↓
 项目 Workspace 边界
       ├─ 文档和分块 → MySQL / SQLite
+      ├─ Git clone → Workspace 独立代码快照
+      ├─ 确定性解析 → 文件树 / 语言 / 依赖 / 代码符号 / Git 历史
       ├─ README / Commit / Issue 导入 → GitHub REST API
       ├─ 混合检索 → 哈希向量 + 关键词匹配
       └─ Agent 工具
@@ -21,3 +23,5 @@ FastAPI 应用
 ```
 
 Workspace 是产品的数据边界：每一份上传的资料、Git commit 和 Issue 都属于一个项目。Atlas 可以同时解释代码库“现在是什么样”和“最近发生了什么变化”。
+
+仓库解析分为两层：程序负责克隆、过滤文件、提取 Python AST / 常见语言符号、依赖和 Git 历史，保证结果可复现；大模型只读取 RAG 检索到的相关片段，用于跨文件解释和自然语言总结。源码不会在导入阶段逐文件发送给大模型。

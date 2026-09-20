@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
 import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -13,7 +14,8 @@ from .github_sync import fetch_context
 from .migrations import migrate_legacy_schema
 from .models import ChatSession, Document, Incident, Message, Project, ProjectTask
 from .rag import index_document, parse_text
-from .schemas import ChatRequest, ChatResponse, ProjectCreate, ProjectOut, SessionCreate, SessionOut
+from .repository_analyzer import RepositoryImportError, build_repository_items, clone_repository, copy_local_repository
+from .schemas import ChatRequest, ChatResponse, ProjectCreate, ProjectOut, ProjectUpdate, SessionCreate, SessionOut
 
 Base.metadata.create_all(bind=engine)
 migrate_legacy_schema(engine)
@@ -30,7 +32,7 @@ if demo_project and _seed_db.query(ProjectTask).filter_by(project_id=demo_projec
     ])
     _seed_db.commit()
 _seed_db.close()
-app = FastAPI(title="Project Atlas", version="0.2.0")
+app = FastAPI(title="Project Atlas", version="0.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -48,6 +50,15 @@ def ready(db: Session = Depends(get_db)):
         raise HTTPException(503, "数据库尚未就绪") from exc
 
 
+@app.get("/api/system/status")
+def system_status():
+    return {
+        "llm_configured": bool(settings.llm_base_url and settings.llm_api_key and settings.llm_model),
+        "llm_model": settings.llm_model if settings.llm_base_url and settings.llm_api_key else None,
+        "github_token_configured": bool(settings.github_token),
+    }
+
+
 @app.get("/api/projects", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db)):
     return db.query(Project).order_by(Project.created_at.asc()).all()
@@ -59,6 +70,18 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
         raise HTTPException(409, "项目 slug 已存在")
     project = Project(**payload.model_dump())
     db.add(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@app.patch("/api/projects/{project_id}", response_model=ProjectOut)
+def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(project, field, value.strip() if isinstance(value, str) else value)
     db.commit()
     db.refresh(project)
     return project
@@ -161,6 +184,45 @@ def _index_remote_items(db: Session, project_id: int, items: list[dict]) -> dict
         indexed += 1
         documents.append({"id": doc.id, "name": doc.name, "chunk_count": count, "source_url": item.get("url")})
     return {"status": "completed", "indexed": indexed, "skipped": skipped, "documents": documents}
+
+
+@app.post("/api/projects/{project_id}/import-repository")
+def import_repository(project_id: int, local_path: str | None = None, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if not local_path and not project.repo_url:
+        raise HTTPException(400, "请配置公开 GitHub 仓库地址或提供本地 Git 仓库路径")
+
+    project.repo_status = "importing"
+    db.commit()
+    try:
+        repo_path = copy_local_repository(project_id, local_path) if local_path else clone_repository(project_id, project.repo_url)
+        source_url = project.repo_url or repo_path.as_uri()
+        items, report = build_repository_items(repo_path, source_url)
+        old_documents = db.query(Document).filter(
+            Document.project_id == project_id,
+            Document.source_type.like("repository_%"),
+        ).all()
+        for document in old_documents:
+            db.delete(document)
+        db.commit()
+        result = _index_remote_items(db, project_id, items)
+        project = db.get(Project, project_id)
+        project.repo_status = "ready"
+        project.repo_local_path = str(repo_path)
+        project.repo_last_commit = report["commit"]
+        project.repo_indexed_files = report["indexed_files"]
+        project.repo_last_synced_at = datetime.utcnow()
+        db.commit()
+        return {**result, **report}
+    except (RepositoryImportError, OSError, ValueError) as exc:
+        db.rollback()
+        project = db.get(Project, project_id)
+        if project:
+            project.repo_status = "failed"
+            db.commit()
+        raise HTTPException(502, str(exc)) from exc
 
 
 @app.post("/api/projects/{project_id}/sync-context")

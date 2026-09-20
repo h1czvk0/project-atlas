@@ -25,6 +25,7 @@ services:
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       UPLOAD_DIR: /app/data/uploads
+      REPOSITORY_DIR: /app/data/repositories
     ports:
       - "8000:8000"
     volumes:

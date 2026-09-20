@@ -2,6 +2,7 @@ from app.rag import chunk_text, cosine, embedding
 from app.agent import _source_excerpt, _source_markdown, summarize_content
 import pytest
 from app.github_sync import parse_repo_url
+from app.repository_analyzer import RepositoryImportError, _candidate_files, _read_source, _symbols, copy_local_repository
 
 
 def test_chunk_text_has_overlap_and_content():
@@ -44,3 +45,25 @@ def test_parse_github_repo_url():
 def test_parse_github_repo_url_rejects_other_hosts():
     with pytest.raises(ValueError):
         parse_repo_url("https://example.com/h1czvk0/project-atlas")
+
+
+def test_repository_analyzer_filters_generated_and_secret_files(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "src" / "service.py").write_text("class PaymentService:\n    def charge(self):\n        return True\n", encoding="utf-8")
+    (tmp_path / "node_modules" / "ignored.js").write_text("const ignored = true", encoding="utf-8")
+    (tmp_path / ".env").write_text("API_KEY=do-not-index", encoding="utf-8")
+    (tmp_path / "config.yml").write_text("api_key: visible-secret", encoding="utf-8")
+
+    files, omitted = _candidate_files(tmp_path)
+    relative = {path.relative_to(tmp_path).as_posix() for path in files}
+
+    assert relative == {"src/service.py", "config.yml"}
+    assert omitted == 0
+    assert "class PaymentService" in _symbols(tmp_path / "src" / "service.py", _read_source(tmp_path / "src" / "service.py"))
+    assert "visible-secret" not in _read_source(tmp_path / "config.yml")
+
+
+def test_local_repository_requires_git_directory(tmp_path):
+    with pytest.raises(RepositoryImportError):
+        copy_local_repository(99, str(tmp_path))

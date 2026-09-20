@@ -5,8 +5,10 @@ __pycache__/
 .env
 data/*.db
 data/uploads/
+data/repositories/
 backend/data/*.db
 backend/data/uploads/
+backend/data/repositories/
 node_modules/
 dist/
 .idea/

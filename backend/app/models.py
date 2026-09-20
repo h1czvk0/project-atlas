@@ -11,6 +11,11 @@ class Project(Base):
     slug: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     repo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    repo_status: Mapped[str] = mapped_column(String(32), default="not_imported")
+    repo_local_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    repo_last_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    repo_indexed_files: Mapped[int] = mapped_column(Integer, default=0)
+    repo_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

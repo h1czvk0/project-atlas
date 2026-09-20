@@ -13,8 +13,18 @@ class ProjectCreate(BaseModel):
     repo_url: str | None = None
 
 
+class ProjectUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    repo_url: str | None = None
+
+
 class ProjectOut(ProjectCreate):
     id: int
+    repo_status: str = "not_imported"
+    repo_last_commit: str | None = None
+    repo_indexed_files: int = 0
+    repo_last_synced_at: datetime | None = None
 
 
 class ChatRequest(BaseModel):

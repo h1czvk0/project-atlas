@@ -122,7 +122,8 @@ def run_agent(db: Session, question: str, session_id: int | None = None, project
         summary = summarize_content(source_text)
         output = {"summary": summary, "source_count": len(hits)}
         _record_tool(db, "summarize_content", {"query": question}, output, session_id)
-        answer = f"## 摘要\n{summary}\n\n## 来源\n{_source_markdown(hits)}"
+        context = "\n\n".join(f"[{hit['document_name']}] {hit['content']}" for hit in hits)
+        answer = _llm_answer(question, context) or f"## 摘要\n{summary}\n\n## 来源\n{_source_markdown(hits)}"
         return {"answer": answer, "intent": "summarize", "used_tools": ["search_knowledge", "summarize_content"], "sources": hits, "confidence": "supported" if hits else "insufficient"}
 
     if any(key in lowered for key in ("任务", "todo", "待办", "未完成")):

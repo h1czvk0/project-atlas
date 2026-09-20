@@ -13,6 +13,14 @@ DOCUMENT_COLUMNS = {
     "source_url": "VARCHAR(1024)",
 }
 
+PROJECT_METADATA_COLUMNS = {
+    "repo_status": "VARCHAR(32) NOT NULL DEFAULT 'not_imported'",
+    "repo_local_path": "VARCHAR(512)",
+    "repo_last_commit": "VARCHAR(64)",
+    "repo_indexed_files": "INTEGER NOT NULL DEFAULT 0",
+    "repo_last_synced_at": "DATETIME",
+}
+
 
 def migrate_legacy_schema(engine: Engine) -> None:
     """Add v0.2 workspace columns to databases created by earlier demos."""
@@ -22,6 +30,11 @@ def migrate_legacy_schema(engine: Engine) -> None:
     column_type = "BIGINT" if dialect == "mysql" else "INTEGER"
 
     with engine.begin() as connection:
+        if "projects" in tables:
+            columns = {item["name"] for item in inspector.get_columns("projects")}
+            for column, definition in PROJECT_METADATA_COLUMNS.items():
+                if column not in columns:
+                    connection.execute(text(f"ALTER TABLE projects ADD COLUMN {column} {definition}"))
         for table, column in PROJECT_COLUMNS.items():
             if table not in tables:
                 continue

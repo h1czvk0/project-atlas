@@ -2,7 +2,7 @@
 
 帮助开发者更快理解陌生代码库。
 
-当前版本：`v0.2.0`
+当前版本：`v0.3.0`
 
 Project Atlas 将项目文档、仓库历史、Issue 和架构说明整理成可检索的项目上下文，为新成员提供一个可以自托管的上手助手。项目面向小型团队和个人维护者，默认在本地运行，项目资料不会因为使用助手而自动发送到第三方 SaaS。
 
@@ -21,6 +21,9 @@ Atlas 根据项目资料回答这些问题，并展示使用到的来源文档�
 ## 当前功能
 
 - 创建相互隔离的项目 Workspace。
+- 将公开 GitHub 仓库克隆到本地，并为每个 Workspace 独立保存代码快照。
+- 后端 API 也支持传入本地 Git 仓库路径，复制快照后建立索引。
+- 解析源码、README、配置、依赖清单、文件树和最近 50 条 Git 历史。
 - 上传 Markdown、TXT、JSON 和 PDF 项目资料。
 - 将公开 GitHub 仓库的 README、最近 Commit 和 Issue 导入项目 Workspace。
 - 对文档进行分块、轻量向量化和混合检索。
@@ -90,6 +93,7 @@ LLM_BASE_URL=https://your-provider.example/v1
 LLM_API_KEY=your-key
 LLM_MODEL=your-model
 GITHUB_TOKEN=your-optional-github-token
+REPOSITORY_DIR=./data/repositories
 ```
 
 `GITHUB_TOKEN` 不是必填项。同步公开仓库时可以匿名访问 GitHub API；如果遇到请求次数限制，可以配置只读 Token 提高限额。真实 Token 只放在本地 `.env`，不要提交到仓库。
@@ -102,6 +106,7 @@ GITHUB_TOKEN=your-optional-github-token
 | POST | `/api/projects` | 创建项目 Workspace |
 | POST | `/api/projects/{id}/sync-readme` | 导入公开 GitHub README |
 | POST | `/api/projects/{id}/sync-context` | 导入公开 GitHub README、Commit 和 Issue |
+| POST | `/api/projects/{id}/import-repository` | 克隆并索引完整仓库上下文 |
 | POST | `/api/documents/upload` | 上传并索引项目资料 |
 | GET | `/api/documents?project_id=1` | 获取某个项目的资料 |
 | POST | `/api/chat` | 向 Agent 提问 |
@@ -111,7 +116,9 @@ GITHUB_TOKEN=your-optional-github-token
 
 ```text
 Vue 3 → FastAPI API → 项目 Workspace
-                         ├─ 文档和分块 → MySQL / SQLite
+                         ├─ Git clone → 本地仓库快照
+                         ├─ 程序解析源码 / 配置 / 依赖 / Git 历史
+                         ├─ 文档和代码分块 → MySQL / SQLite
                          ├─ search_knowledge → 混合检索
                          ├─ query_project_data → 项目任务
                          ├─ query_incident_history → 未关闭故障
@@ -149,13 +156,14 @@ $env:PYTHONPATH='.'
 - [x] 新成员上手路径工具
 - [x] SSE 增量回答和 Markdown 渲染
 - [x] 后端评测脚本和前后端 CI
+- [x] 本地克隆并索引公开代码仓库
 - [ ] 使用 LangGraph 表达复杂条件工作流
 - [ ] 接入 Qdrant 或托管 embedding 服务
 - [ ] 增加浏览器扩展，用于保存项目上下文
 
 ## 当前限制
 
-这是一个本地优先的开源项目，不是生产级代码智能平台。默认 embedding 实现强调轻量和可复现，暂不宣称生产环境准确率、用户数量或企业级 SLA。
+这是一个本地优先的开源项目，不是生产级代码智能平台。仓库导入目前支持公开 GitHub 仓库，最多索引 500 个文本文件和 6MB 文本内容，并排除依赖目录、构建产物、锁文件及 `.env`。默认 embedding 实现强调轻量和可复现，暂不宣称生产环境准确率、用户数量或企业级 SLA。
 
 ## 开源许可
 
