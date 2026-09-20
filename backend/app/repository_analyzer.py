@@ -212,7 +212,13 @@ def _priority(path: Path) -> tuple[int, str]:
     return 3, path.as_posix()
 
 
-def _candidate_files(repo_path: Path, max_files: int = 500, max_total_bytes: int = 6 * 1024 * 1024) -> tuple[list[Path], int]:
+def _candidate_files(
+    repo_path: Path,
+    max_files: int | None = None,
+    max_total_bytes: int | None = None,
+) -> tuple[list[Path], int]:
+    max_files = max_files or settings.repository_max_files
+    max_total_bytes = max_total_bytes or settings.repository_max_total_mb * 1024 * 1024
     candidates = []
     for path in repo_path.rglob("*"):
         relative = path.relative_to(repo_path)

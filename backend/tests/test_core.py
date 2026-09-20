@@ -104,6 +104,16 @@ def test_repository_analyzer_filters_generated_and_secret_files(tmp_path):
     assert "visible-secret" not in _read_source(tmp_path / "config.yml")
 
 
+def test_repository_limits_can_be_configured(monkeypatch, tmp_path):
+    for index in range(4):
+        (tmp_path / f"file-{index}.py").write_text(f"value = {index}\n", encoding="utf-8")
+    monkeypatch.setattr("app.repository_analyzer.settings.repository_max_files", 2)
+    monkeypatch.setattr("app.repository_analyzer.settings.repository_max_total_mb", 1)
+    files, omitted = _candidate_files(tmp_path)
+    assert len(files) == 2
+    assert omitted == 2
+
+
 def test_local_repository_requires_git_directory(tmp_path):
     with pytest.raises(RepositoryImportError):
         copy_local_repository(99, str(tmp_path))

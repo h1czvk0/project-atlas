@@ -27,6 +27,8 @@ services:
       GITHUB_CLONE_PROXY: ${GITHUB_CLONE_PROXY:-https://gh-proxy.org}
       UPLOAD_DIR: /app/data/uploads
       WORKSPACE_DIR: /app/data/workspaces
+      REPOSITORY_MAX_FILES: ${REPOSITORY_MAX_FILES:-500}
+      REPOSITORY_MAX_TOTAL_MB: ${REPOSITORY_MAX_TOTAL_MB:-6}
     ports:
       - "8000:8000"
     volumes:

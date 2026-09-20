@@ -101,6 +101,8 @@ LLM_REASONING_EFFORT=auto
 GITHUB_TOKEN=your-optional-github-token
 GITHUB_CLONE_PROXY=https://gh-proxy.org
 WORKSPACE_DIR=E:/program/agent
+REPOSITORY_MAX_FILES=500
+REPOSITORY_MAX_TOTAL_MB=6
 ```
 
 `GITHUB_TOKEN` 不是必填项。同步公开仓库时可以匿名访问 GitHub API；如果遇到请求次数限制，可以配置只读 Token 提高限额。真实 Token 只放在本地 `.env`，不要提交到仓库。
@@ -108,6 +110,8 @@ WORKSPACE_DIR=E:/program/agent
 公开仓库克隆默认按照 [GH-Proxy GitHub 加速指南](https://gh-proxy.com/docs/github-accelerator) 通过 `GITHUB_CLONE_PROXY` 加速，实际地址形如 `https://gh-proxy.org/https://github.com/owner/repo.git`。设置为空字符串可恢复 GitHub 直连。该公共代理仅用于公开仓库，不要通过它发送私有仓库凭据。
 
 `WORKSPACE_DIR` 用于指定仓库工作区的统一存放目录。Windows 的 `.env` 推荐写成 `E:/program/agent`；Atlas 会在其中按“项目名-ID”创建独立目录，例如 `E:/program/agent/slsc-2`。旧版 `REPOSITORY_DIR` 仍然兼容，但仅在未配置 `WORKSPACE_DIR` 时使用。
+
+仓库分析默认最多读取 500 个文本文件、累计 6MB 内容。超过范围时不会导入失败，而是优先索引 README、依赖配置、项目文档和源码文件，并在“仓库概览”中记录跳过数量。分析大型仓库时，可以通过 `REPOSITORY_MAX_FILES` 和 `REPOSITORY_MAX_TOTAL_MB` 调高范围；数值越大，建立索引和检索所需的时间与内存也越多。
 
 创建 Workspace 时填写仓库地址后，Atlas 会在后台自动完成克隆、源码解析、知识索引和 GitHub 动态同步，页面会显示当前阶段和进度。模型连接不会在打开页面时自动发起；点击“测试模型”才会进行一次最小请求。
 
@@ -180,7 +184,7 @@ $env:PYTHONPATH='.'
 
 ## 当前限制
 
-这是一个本地优先的开源项目，不是生产级代码智能平台。仓库导入目前支持公开 GitHub 仓库，最多索引 500 个文本文件和 6MB 文本内容，并排除依赖目录、构建产物、锁文件及 `.env`。默认 embedding 实现强调轻量和可复现，暂不宣称生产环境准确率、用户数量或企业级 SLA。
+仓库自动克隆目前支持公开 GitHub 仓库，也可通过 API 导入本地 Git 仓库。为避免无效内容和敏感配置进入知识库，分析过程会排除依赖目录、构建产物、锁文件及 `.env`。默认使用本地轻量向量化，适合个人项目和中小型代码库；索引范围可通过环境变量按机器性能调整。
 
 ## 开源许可
 

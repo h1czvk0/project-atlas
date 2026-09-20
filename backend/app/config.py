@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     upload_dir: str = "./data/uploads"
     workspace_dir: str = ""
     repository_dir: str = "./data/repositories"
+    repository_max_files: int = 500
+    repository_max_total_mb: int = 6
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
