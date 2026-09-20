@@ -1,8 +1,10 @@
+from pathlib import Path
+
 from app.rag import chunk_text, cosine, embedding
 from app.agent import _llm_payload, _source_excerpt, _source_markdown, summarize_content
 import pytest
 from app.github_sync import parse_repo_url
-from app.repository_analyzer import RepositoryImportError, _candidate_files, _git_proxy_overrides, _read_source, _symbols, copy_local_repository
+from app.repository_analyzer import RepositoryImportError, _candidate_files, _git_proxy_overrides, _read_source, _symbols, clone_repository, copy_local_repository
 
 
 def test_chunk_text_has_overlap_and_content():
@@ -83,3 +85,19 @@ def test_dead_local_git_proxy_is_disabled(monkeypatch):
     monkeypatch.setattr("app.repository_analyzer.subprocess.run", lambda *args, **kwargs: Result())
     monkeypatch.setattr("app.repository_analyzer.socket.create_connection", lambda *args, **kwargs: (_ for _ in ()).throw(OSError()))
     assert _git_proxy_overrides() == ["-c", "http.proxy=", "-c", "https.proxy="]
+
+
+def test_clone_repository_uses_configured_accelerator(monkeypatch, tmp_path):
+    commands = []
+    monkeypatch.setattr("app.repository_analyzer.settings.repository_dir", str(tmp_path))
+    monkeypatch.setattr("app.repository_analyzer.settings.github_clone_proxy", "https://gh-proxy.org/")
+    monkeypatch.setattr("app.repository_analyzer._git_proxy_overrides", lambda: [])
+
+    def fake_run(args, **kwargs):
+        commands.append(args)
+        Path(args[-1]).mkdir()
+        return ""
+
+    monkeypatch.setattr("app.repository_analyzer._run_git", fake_run)
+    clone_repository(7, "https://github.com/h1czvk0/slsc.git")
+    assert "https://gh-proxy.org/https://github.com/h1czvk0/slsc.git" in commands[0]

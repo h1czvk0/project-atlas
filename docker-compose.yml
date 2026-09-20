@@ -24,6 +24,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_CLONE_PROXY: ${GITHUB_CLONE_PROXY:-https://gh-proxy.org}
       UPLOAD_DIR: /app/data/uploads
       REPOSITORY_DIR: /app/data/repositories
     ports:

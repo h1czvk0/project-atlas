@@ -101,7 +101,9 @@ def _remove_tree(path: Path) -> None:
 
 def clone_repository(project_id: int, repo_url: str) -> Path:
     owner, repo = parse_repo_url(repo_url)
-    clone_url = f"https://github.com/{owner}/{repo}.git"
+    github_url = f"https://github.com/{owner}/{repo}.git"
+    proxy = settings.github_clone_proxy.strip().rstrip("/")
+    clone_url = f"{proxy}/{github_url}" if proxy else github_url
     root = Path(settings.repository_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
     target = _managed_path(root / f"project-{project_id}", root)

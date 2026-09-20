@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_reasoning_effort: str = "auto"
     github_token: str = ""
+    github_clone_proxy: str = "https://gh-proxy.org"
     upload_dir: str = "./data/uploads"
     repository_dir: str = "./data/repositories"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
