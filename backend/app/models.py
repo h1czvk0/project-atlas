@@ -15,6 +15,9 @@ class Project(Base):
     repo_local_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     repo_last_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
     repo_indexed_files: Mapped[int] = mapped_column(Integer, default=0)
+    repo_progress: Mapped[int] = mapped_column(Integer, default=0)
+    repo_stage: Mapped[str] = mapped_column(String(64), default="等待导入")
+    repo_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     repo_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

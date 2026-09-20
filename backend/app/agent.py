@@ -76,10 +76,10 @@ def query_incident_history(db: Session, keyword: str = "", project_id: int = 1) 
              "symptom": row.symptom, "status": row.status} for row in rows.order_by(Incident.created_at.desc()).limit(5)]
 
 
-def _llm_answer(question: str, context: str) -> str | None:
-    if not settings.llm_base_url or not settings.llm_api_key:
-        return None
-    url = settings.llm_base_url.rstrip("/") + "/chat/completions"
+REASONING_VALUES = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+
+def _llm_payload(question: str, context: str, reasoning_effort: str | None = None) -> dict:
     prompt = (
         "你是 Project Atlas 的项目上下文助手。只能根据上下文回答，不能补写没有证据的事实。"
         "请只输出 Markdown，并严格使用以下结构：\n"
@@ -89,9 +89,25 @@ def _llm_answer(question: str, context: str) -> str | None:
         "如果证据不足，请在‘结论’中明确说明。不要输出 HTML、JSON 或思考过程。"
         "\n\n上下文：\n" + context + "\n\n问题：" + question
     )
+    payload = {"model": settings.llm_model, "messages": [{"role": "user", "content": prompt}]}
+    effort = reasoning_effort or settings.llm_reasoning_effort
+    if effort in REASONING_VALUES:
+        payload["reasoning_effort"] = effort
+    return payload
+
+
+def _llm_answer(question: str, context: str, reasoning_effort: str | None = None) -> str | None:
+    if not settings.llm_base_url or not settings.llm_api_key:
+        return None
+    url = settings.llm_base_url.rstrip("/") + "/chat/completions"
+    payload = _llm_payload(question, context, reasoning_effort)
     try:
         response = httpx.post(url, headers={"Authorization": f"Bearer {settings.llm_api_key}"},
-                              json={"model": settings.llm_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}, timeout=30)
+                              json=payload, timeout=60)
+        if response.status_code in {400, 422} and "reasoning_effort" in payload:
+            payload.pop("reasoning_effort")
+            response = httpx.post(url, headers={"Authorization": f"Bearer {settings.llm_api_key}"},
+                                  json=payload, timeout=60)
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
     except (httpx.HTTPError, KeyError, IndexError, TypeError):
@@ -121,7 +137,7 @@ def check_llm_connection() -> dict:
         return {"configured": True, "reachable": False, "model": settings.llm_model, "message": message}
 
 
-def run_agent(db: Session, question: str, session_id: int | None = None, project_id: int = 1) -> dict:
+def run_agent(db: Session, question: str, session_id: int | None = None, project_id: int = 1, reasoning_effort: str | None = None) -> dict:
     lowered = question.lower()
     if any(key in lowered for key in ("有哪些文档", "文档列表", "文件列表")):
         docs = query_document(db, "", project_id)
@@ -146,7 +162,7 @@ def run_agent(db: Session, question: str, session_id: int | None = None, project
         output = {"summary": summary, "source_count": len(hits)}
         _record_tool(db, "summarize_content", {"query": question}, output, session_id)
         context = "\n\n".join(f"[{hit['document_name']}] {hit['content']}" for hit in hits)
-        answer = _llm_answer(question, context) or f"## 摘要\n{summary}\n\n## 来源\n{_source_markdown(hits)}"
+        answer = _llm_answer(question, context, reasoning_effort) or f"## 摘要\n{summary}\n\n## 来源\n{_source_markdown(hits)}"
         return {"answer": answer, "intent": "summarize", "used_tools": ["search_knowledge", "summarize_content"], "sources": hits, "confidence": "supported" if hits else "insufficient"}
 
     if any(key in lowered for key in ("任务", "todo", "待办", "未完成")):
@@ -175,6 +191,6 @@ def run_agent(db: Session, question: str, session_id: int | None = None, project
         confidence = "insufficient"
     else:
         context = "\n\n".join(f"[{hit['document_name']}] {hit['content']}" for hit in hits)
-        answer = _llm_answer(question, context) or f"## 结论\n根据项目资料，最相关的内容来自 **{hits[0]['document_name']}**。\n\n## 依据\n{_source_markdown(hits)}\n\n## 下一步\n如果需要更具体的结论，请补充模块名、错误信息或运行环境。"
+        answer = _llm_answer(question, context, reasoning_effort) or f"## 结论\n根据项目资料，最相关的内容来自 **{hits[0]['document_name']}**。\n\n## 依据\n{_source_markdown(hits)}\n\n## 下一步\n如果需要更具体的结论，请补充模块名、错误信息或运行环境。"
         confidence = "supported"
     return {"answer": answer, "intent": "knowledge_qa", "used_tools": ["search_knowledge"], "sources": hits, "confidence": confidence}

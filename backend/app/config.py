@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
+    llm_reasoning_effort: str = "auto"
     github_token: str = ""
     upload_dir: str = "./data/uploads"
     repository_dir: str = "./data/repositories"

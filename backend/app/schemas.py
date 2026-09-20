@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from pydantic import BaseModel
 
 
@@ -24,6 +25,9 @@ class ProjectOut(ProjectCreate):
     repo_status: str = "not_imported"
     repo_last_commit: str | None = None
     repo_indexed_files: int = 0
+    repo_progress: int = 0
+    repo_stage: str = "等待导入"
+    repo_error: str | None = None
     repo_last_synced_at: datetime | None = None
 
 
@@ -31,6 +35,7 @@ class ChatRequest(BaseModel):
     question: str
     session_id: int | None = None
     project_id: int | None = 1
+    reasoning_effort: Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = None
 
 
 class ChatResponse(BaseModel):

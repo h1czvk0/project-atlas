@@ -34,6 +34,9 @@ header p { margin: 0; color: #718096; font-size: 15px; }
 .repo-url input { min-width: 0; flex: 1; padding: 7px; border: 1px solid #d5dfec; border-radius: 6px; outline: none; }
 .repo-url button { padding: 0 9px; font-size: 11px; }
 .repo-url button:disabled { cursor: not-allowed; opacity: .55; }
+.progress-track { height: 6px; margin-top: 7px; overflow: hidden; border-radius: 999px; background: #dce6f2; }
+.progress-track span { display: block; height: 100%; border-radius: inherit; background: #3976c9; transition: width .35s ease; }
+.repo-error { color: #b44d58; line-height: 1.45; }
 .workspace-setup summary { color: #4c6f9f; font-size: 12px; font-weight: 700; cursor: pointer; }
 .workspace-setup input { width: 100%; margin-top: 8px; padding: 8px 9px; border: 1px solid #dce4ef; border-radius: 7px; outline: none; color: #334158; }
 .workspace-setup button { width: 100%; margin-top: 8px; padding: 8px; font-size: 12px; }

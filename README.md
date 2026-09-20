@@ -92,11 +92,16 @@ npm run dev
 LLM_BASE_URL=https://your-provider.example/v1
 LLM_API_KEY=your-key
 LLM_MODEL=your-model
+LLM_REASONING_EFFORT=auto
 GITHUB_TOKEN=your-optional-github-token
 REPOSITORY_DIR=./data/repositories
 ```
 
 `GITHUB_TOKEN` 不是必填项。同步公开仓库时可以匿名访问 GitHub API；如果遇到请求次数限制，可以配置只读 Token 提高限额。真实 Token 只放在本地 `.env`，不要提交到仓库。
+
+创建 Workspace 时填写仓库地址后，Atlas 会在后台自动完成克隆、源码解析、知识索引和 GitHub 动态同步，页面会显示当前阶段和进度。模型连接不会在打开页面时自动发起；点击“测试模型”才会进行一次最小请求。
+
+`LLM_REASONING_EFFORT` 可设为 `auto`、`none`、`minimal`、`low`、`medium`、`high`、`xhigh` 或 `max`。也可在页面按次选择。若兼容服务不支持 `reasoning_effort`，Atlas 会自动移除该参数后重试。
 
 ## 主要接口
 

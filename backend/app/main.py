@@ -14,7 +14,8 @@ from .github_sync import fetch_context
 from .migrations import migrate_legacy_schema
 from .models import ChatSession, Document, Incident, Message, Project, ProjectTask
 from .rag import index_document, parse_text
-from .repository_analyzer import RepositoryImportError, build_repository_items, clone_repository, copy_local_repository
+from .repository_analyzer import RepositoryImportError, build_repository_items, copy_local_repository
+from .repository_jobs import start_repository_import
 from .schemas import ChatRequest, ChatResponse, ProjectCreate, ProjectOut, ProjectUpdate, SessionCreate, SessionOut
 
 Base.metadata.create_all(bind=engine)
@@ -51,13 +52,19 @@ def ready(db: Session = Depends(get_db)):
 
 
 @app.get("/api/system/status")
-def system_status():
-    llm = check_llm_connection()
+def system_status(check: bool = False):
+    llm = check_llm_connection() if check else {
+        "configured": bool(settings.llm_base_url and settings.llm_api_key and settings.llm_model),
+        "reachable": None,
+        "model": settings.llm_model if settings.llm_base_url and settings.llm_api_key else None,
+        "message": "点击测试连接" if settings.llm_base_url and settings.llm_api_key else "未配置大模型",
+    }
     return {
         "llm_configured": llm["configured"],
         "llm_reachable": llm["reachable"],
         "llm_model": llm["model"],
         "llm_message": llm["message"],
+        "llm_reasoning_effort": settings.llm_reasoning_effort,
         "github_token_configured": bool(settings.github_token),
     }
 
@@ -67,7 +74,7 @@ def list_projects(db: Session = Depends(get_db)):
     return db.query(Project).order_by(Project.created_at.asc()).all()
 
 
-@app.post("/api/projects", response_model=ProjectOut)
+@app.post("/api/projects", response_model=ProjectOut, status_code=201)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
     if db.query(Project).filter_by(slug=payload.slug).first():
         raise HTTPException(409, "项目 slug 已存在")
@@ -75,6 +82,12 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
     db.add(project)
     db.commit()
     db.refresh(project)
+    if project.repo_url:
+        project.repo_status = "queued"
+        project.repo_stage = "等待分析"
+        project.repo_progress = 2
+        db.commit()
+        start_repository_import(project.id)
     return project
 
 
@@ -197,10 +210,23 @@ def import_repository(project_id: int, local_path: str | None = None, db: Sessio
     if not local_path and not project.repo_url:
         raise HTTPException(400, "请配置公开 GitHub 仓库地址或提供本地 Git 仓库路径")
 
+    if not local_path:
+        project.repo_status = "queued"
+        project.repo_stage = "等待分析"
+        project.repo_progress = 2
+        project.repo_error = None
+        db.commit()
+        if not start_repository_import(project_id):
+            raise HTTPException(409, "仓库分析任务正在运行")
+        return {"status": "queued", "project_id": project_id}
+
     project.repo_status = "importing"
+    project.repo_stage = "正在导入本地仓库"
+    project.repo_progress = 10
+    project.repo_error = None
     db.commit()
     try:
-        repo_path = copy_local_repository(project_id, local_path) if local_path else clone_repository(project_id, project.repo_url)
+        repo_path = copy_local_repository(project_id, local_path)
         source_url = project.repo_url or repo_path.as_uri()
         items, report = build_repository_items(repo_path, source_url)
         old_documents = db.query(Document).filter(
@@ -213,6 +239,9 @@ def import_repository(project_id: int, local_path: str | None = None, db: Sessio
         result = _index_remote_items(db, project_id, items)
         project = db.get(Project, project_id)
         project.repo_status = "ready"
+        project.repo_progress = 100
+        project.repo_stage = "分析完成"
+        project.repo_error = None
         project.repo_local_path = str(repo_path)
         project.repo_last_commit = report["commit"]
         project.repo_indexed_files = report["indexed_files"]
@@ -224,6 +253,8 @@ def import_repository(project_id: int, local_path: str | None = None, db: Sessio
         project = db.get(Project, project_id)
         if project:
             project.repo_status = "failed"
+            project.repo_stage = "分析失败"
+            project.repo_error = str(exc)[:1000]
             db.commit()
         raise HTTPException(502, str(exc)) from exc
 
@@ -302,7 +333,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(session)
     db.add(Message(session_id=session.id, role="user", content=payload.question))
-    result = run_agent(db, payload.question, session.id, project_id)
+    result = run_agent(db, payload.question, session.id, project_id, payload.reasoning_effort)
     db.add(Message(session_id=session.id, role="assistant", content=result["answer"], metadata_json=result))
     db.commit()
     return result

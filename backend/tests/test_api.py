@@ -15,7 +15,7 @@ def test_project_workspace_document_and_stream_flow():
     if project.status_code == 409:
         project_id = next(item["id"] for item in client.get("/api/projects").json() if item["slug"] == "api-test-project")
     else:
-        assert project.status_code == 200
+        assert project.status_code == 201
         project_id = project.json()["id"]
 
     content = b"# API Test\nRun the service with Docker Compose."
@@ -62,4 +62,5 @@ def test_system_status_does_not_expose_api_key():
     assert response.status_code == 200
     assert "llm_configured" in response.json()
     assert "llm_reachable" in response.json()
+    assert response.json()["llm_reachable"] is None
     assert "llm_api_key" not in response.json()

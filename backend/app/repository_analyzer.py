@@ -2,6 +2,7 @@ import ast
 import json
 import re
 import shutil
+import socket
 import subprocess
 import uuid
 from collections import Counter
@@ -45,6 +46,28 @@ class RepositoryImportError(RuntimeError):
     pass
 
 
+def _git_proxy_overrides() -> list[str]:
+    overrides = []
+    for key in ("http.proxy", "https.proxy"):
+        try:
+            result = subprocess.run(
+                ["git", "config", "--global", "--get", key], capture_output=True,
+                text=True, encoding="utf-8", errors="replace", timeout=5, check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        proxy = result.stdout.strip()
+        match = re.match(r"https?://([^:/]+):(\d+)", proxy)
+        if not match or match.group(1) not in {"127.0.0.1", "localhost"}:
+            continue
+        try:
+            with socket.create_connection((match.group(1), int(match.group(2))), timeout=1):
+                pass
+        except OSError:
+            overrides.extend(["-c", f"{key}="])
+    return overrides
+
+
 def _run_git(args: list[str], cwd: Path | None = None, timeout: int = 120) -> str:
     try:
         result = subprocess.run(
@@ -84,7 +107,7 @@ def clone_repository(project_id: int, repo_url: str) -> Path:
     target = _managed_path(root / f"project-{project_id}", root)
     staging = _managed_path(root / f".project-{project_id}-{uuid.uuid4().hex}.tmp", root)
     try:
-        _run_git(["clone", "--depth", "50", "--no-tags", clone_url, str(staging)])
+        _run_git([*_git_proxy_overrides(), "clone", "--depth", "50", "--no-tags", clone_url, str(staging)])
         if target.exists():
             _remove_tree(target)
         staging.replace(target)

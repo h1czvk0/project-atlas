@@ -1,8 +1,8 @@
 from app.rag import chunk_text, cosine, embedding
-from app.agent import _source_excerpt, _source_markdown, summarize_content
+from app.agent import _llm_payload, _source_excerpt, _source_markdown, summarize_content
 import pytest
 from app.github_sync import parse_repo_url
-from app.repository_analyzer import RepositoryImportError, _candidate_files, _read_source, _symbols, copy_local_repository
+from app.repository_analyzer import RepositoryImportError, _candidate_files, _git_proxy_overrides, _read_source, _symbols, copy_local_repository
 
 
 def test_chunk_text_has_overlap_and_content():
@@ -67,3 +67,19 @@ def test_repository_analyzer_filters_generated_and_secret_files(tmp_path):
 def test_local_repository_requires_git_directory(tmp_path):
     with pytest.raises(RepositoryImportError):
         copy_local_repository(99, str(tmp_path))
+
+
+def test_reasoning_effort_is_optional_in_llm_payload():
+    automatic = _llm_payload("问题", "上下文", "auto")
+    high = _llm_payload("问题", "上下文", "high")
+    assert "reasoning_effort" not in automatic
+    assert high["reasoning_effort"] == "high"
+
+
+def test_dead_local_git_proxy_is_disabled(monkeypatch):
+    class Result:
+        stdout = "http://127.0.0.1:1"
+
+    monkeypatch.setattr("app.repository_analyzer.subprocess.run", lambda *args, **kwargs: Result())
+    monkeypatch.setattr("app.repository_analyzer.socket.create_connection", lambda *args, **kwargs: (_ for _ in ()).throw(OSError()))
+    assert _git_proxy_overrides() == ["-c", "http.proxy=", "-c", "https.proxy="]

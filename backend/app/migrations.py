@@ -18,6 +18,9 @@ PROJECT_METADATA_COLUMNS = {
     "repo_local_path": "VARCHAR(512)",
     "repo_last_commit": "VARCHAR(64)",
     "repo_indexed_files": "INTEGER NOT NULL DEFAULT 0",
+    "repo_progress": "INTEGER NOT NULL DEFAULT 0",
+    "repo_stage": "VARCHAR(64) NOT NULL DEFAULT '等待导入'",
+    "repo_error": "TEXT",
     "repo_last_synced_at": "DATETIME",
 }
 

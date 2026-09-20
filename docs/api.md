@@ -10,7 +10,7 @@
 | POST | `/api/projects/{id}/sync-readme` | 导入公开 GitHub README |
 | POST | `/api/projects/{id}/sync-context` | 导入 README、最近 Commit 和 Issue |
 | POST | `/api/projects/{id}/import-repository` | 克隆仓库并索引源码、配置和 Git 历史；可传 `local_path` 查询参数导入本地 Git 仓库 |
-| GET | `/api/system/status` | 查询大模型和 GitHub Token 配置状态 |
+| GET | `/api/system/status` | 读取模型配置状态；传 `check=true` 时手动测试连接 |
 | POST | `/api/documents/upload` | 上传并索引项目资料 |
 | GET | `/api/documents?project_id=1` | 获取某个项目的资料 |
 | POST | `/api/documents/{id}/reindex` | 重新建立索引 |
