@@ -4,6 +4,7 @@ from app.rag import chunk_text, cosine, embedding
 from app.agent import _llm_answer, _llm_payload, _source_excerpt, _source_markdown, summarize_content
 import pytest
 from app.github_sync import parse_repo_url
+from app.document_storage import content_digest_candidates
 from app.repository_analyzer import RepositoryImportError, _candidate_files, _git_proxy_overrides, _read_source, _run_git_with_progress, _symbols, clone_repository, copy_local_repository, project_workspace_path
 
 
@@ -16,6 +17,13 @@ def test_chunk_text_has_overlap_and_content():
 def test_embedding_is_normalized():
     vector = embedding("FastAPI RAG Agent")
     assert round(cosine(vector, vector), 5) == 1
+
+
+def test_project_digest_keeps_legacy_candidate_for_existing_data():
+    first, legacy = content_digest_candidates(1, b"same")
+    second, same_legacy = content_digest_candidates(2, b"same")
+    assert first != second
+    assert legacy == same_legacy
 
 
 def test_summary_keeps_key_lines():

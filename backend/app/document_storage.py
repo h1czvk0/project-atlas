@@ -11,6 +11,10 @@ def project_content_digest(project_id: int, raw: bytes) -> str:
     return hashlib.sha256(f"project:{project_id}:".encode() + raw).hexdigest()
 
 
+def content_digest_candidates(project_id: int, raw: bytes) -> tuple[str, str]:
+    return project_content_digest(project_id, raw), hashlib.sha256(raw).hexdigest()
+
+
 def upload_root() -> Path:
     root = Path(settings.upload_dir).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)

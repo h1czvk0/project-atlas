@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from .agent import check_llm_connection, run_agent
 from .config import settings
 from .db import Base, SessionLocal, engine, get_db
-from .document_storage import cleanup_unreferenced_files, project_content_digest, write_project_file
+from .document_storage import cleanup_unreferenced_files, content_digest_candidates, write_project_file
 from .github_sync import fetch_context
 from .migrations import migrate_legacy_schema
 from .models import ChatSession, Document, Incident, Message, Project, ProjectTask, ToolCall
@@ -199,8 +199,11 @@ async def upload_document(file: UploadFile = File(...), project_id: int = Form(1
         raise HTTPException(413, "文件不能超过 10MB")
     if not db.get(Project, project_id):
         raise HTTPException(404, "项目不存在")
-    digest = project_content_digest(project_id, raw)
-    existing = db.query(Document).filter_by(project_id=project_id, sha256=digest).first()
+    digest, legacy_digest = content_digest_candidates(project_id, raw)
+    existing = db.query(Document).filter(
+        Document.project_id == project_id,
+        Document.sha256.in_([digest, legacy_digest]),
+    ).first()
     if existing:
         raise HTTPException(409, f"文件已存在，文档 ID 为 {existing.id}")
     target = write_project_file(project_id, digest, suffix, raw)
@@ -237,8 +240,11 @@ def _index_remote_items(db: Session, project_id: int, items: list[dict]) -> dict
     documents = []
     for item in items:
         raw = item["content"].encode("utf-8")
-        digest = project_content_digest(project_id, raw)
-        if db.query(Document).filter_by(project_id=project_id, sha256=digest).first():
+        digest, legacy_digest = content_digest_candidates(project_id, raw)
+        if db.query(Document).filter(
+            Document.project_id == project_id,
+            Document.sha256.in_([digest, legacy_digest]),
+        ).first():
             skipped += 1
             continue
         target = write_project_file(project_id, digest, ".md", raw)
