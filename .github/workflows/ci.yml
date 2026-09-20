@@ -10,6 +10,7 @@ jobs:
         with: {python-version: '3.12'}
       - run: pip install -r requirements.txt
       - run: PYTHONPATH=. pytest -q
+      - run: PYTHONPATH=. python scripts/evaluate.py
   frontend:
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: frontend}}
