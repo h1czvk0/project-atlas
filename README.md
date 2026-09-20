@@ -58,6 +58,28 @@ Atlas 返回结构化上手路径
 
 以下命令请在仓库根目录执行。
 
+Windows 用户可以直接运行一键启动脚本：
+
+```powershell
+.\start.ps1
+```
+
+脚本会检查运行环境，首次运行时创建 `.env` 和 `.venv`、安装缺失依赖、分别启动前后端并打开浏览器。已有 `.env` 不会被覆盖；如果 8000 或 5173 端口已有服务，脚本会保留现有进程并跳过对应服务。后续依赖没有变化时会直接启动。
+
+只启动服务、不检查依赖：
+
+```powershell
+.\start.ps1 -SkipInstall
+```
+
+如果 PowerShell 禁止执行本地脚本，可使用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+```
+
+也可以继续使用下面的手动启动方式。首次初始化本地配置时执行：
+
 ```powershell
 Copy-Item .env.example .env
 ```
