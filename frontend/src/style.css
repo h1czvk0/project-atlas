@@ -46,10 +46,14 @@ header p { margin: 0; color: #718096; font-size: 15px; }
 .workspace-setup summary { color: #4c6f9f; font-size: 12px; font-weight: 700; cursor: pointer; }
 .workspace-setup input { width: 100%; margin-top: 8px; padding: 8px 9px; border: 1px solid #dce4ef; border-radius: 7px; outline: none; color: #334158; }
 .workspace-setup button { width: 100%; margin-top: 8px; padding: 8px; font-size: 12px; }
+.local-path { display: block; margin-top: 8px; overflow: hidden; color: #6f7f95; text-overflow: ellipsis; white-space: nowrap; }
 .chat { display: flex; height: min(720px, calc(100vh - 210px)); min-height: 560px; flex-direction: column; overflow: hidden; padding: 24px; }
 .panel-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .panel-title h2 { margin: 0; color: #25324a; font-size: 16px; }
 .panel-title small, .panel-title span, small { color: #77859a; font-size: 12px; }
+.session-actions { display: flex; align-items: center; gap: 6px; }
+.session-actions select { max-width: 180px; padding: 6px 8px; border: 1px solid #d8e1ec; border-radius: 7px; background: #fff; color: #52627a; outline: none; font-size: 11px; }
+.session-actions button { width: 30px; height: 30px; padding: 0; font-size: 16px; }
 .upload { display: flex; flex-direction: column; gap: 5px; margin-bottom: 18px; padding: 20px; border: 1px dashed #a8bedf; border-radius: 12px; color: #3976c9; cursor: pointer; background: #f8fbff; transition: transform .16s ease, border-color .16s ease, background-color .16s ease; }
 .upload:hover { border-color: #3976c9; background: #f1f7ff; transform: translateY(-1px); }
 .upload input { display: none; }

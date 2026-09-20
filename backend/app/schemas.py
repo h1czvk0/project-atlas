@@ -30,6 +30,7 @@ class ProjectOut(ProjectCreate):
     repo_stage: str = "等待导入"
     repo_error: str | None = None
     repo_last_synced_at: datetime | None = None
+    repo_local_path: str | None = None
 
 
 class ChatRequest(BaseModel):
