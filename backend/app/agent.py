@@ -186,14 +186,14 @@ def run_agent(db: Session, question: str, session_id: int | None = None, project
         answer = "## 文档概览\n当前知识库共有 **{}** 份文档。\n\n## 文档列表\n{}".format(
             len(docs), "\n".join(f"- **{doc['name']}** · {doc['status']} · {doc['chunks']} 个片段" for doc in docs) or "- 暂无文档"
         )
-        return {"answer": answer, "intent": "document_query", "used_tools": ["query_document"], "sources": [], "confidence": "structured"}
+        return {"answer": answer, "intent": "document_query", "used_tools": ["query_document"], "sources": [], "confidence": "structured", "answer_mode": "structured"}
 
     if any(key in lowered for key in ("新人", "上手", "先阅读", "了解项目", "学习顺序")):
         plan = build_onboarding_plan(db, project_id)
         _record_tool(db, "build_onboarding_plan", {"project_id": project_id}, {"steps": plan}, session_id)
         lines = "\n".join(f"{item['step']}. **{item['document']}**：{item['reason']}" for item in plan) or "暂无足够项目资料，请先上传 README 或架构文档。"
         answer = f"## 新成员上手路径\n建议按以下顺序阅读：\n\n{lines}\n\n## 使用建议\n阅读每份资料后，尝试向 Atlas 提一个具体问题，确认自己理解了项目边界。"
-        return {"answer": answer, "intent": "onboarding_plan", "used_tools": ["build_onboarding_plan"], "sources": [], "confidence": "structured" if plan else "insufficient"}
+        return {"answer": answer, "intent": "onboarding_plan", "used_tools": ["build_onboarding_plan"], "sources": [], "confidence": "structured" if plan else "insufficient", "answer_mode": "structured"}
 
     if any(key in lowered for key in ("总结", "摘要", "概括")):
         hits = search(db, question, 4, project_id)
@@ -202,8 +202,9 @@ def run_agent(db: Session, question: str, session_id: int | None = None, project
         output = {"summary": summary, "source_count": len(hits)}
         _record_tool(db, "summarize_content", {"query": question}, output, session_id)
         context = "\n\n".join(f"[{hit['document_name']}] {hit['content']}" for hit in hits)
-        answer = _llm_answer(question, context, reasoning_effort, history, on_delta) or f"## 摘要\n{summary}\n\n## 来源\n{_source_markdown(hits)}"
-        return {"answer": answer, "intent": "summarize", "used_tools": ["search_knowledge", "summarize_content"], "sources": hits, "confidence": "supported" if hits else "insufficient"}
+        model_answer = _llm_answer(question, context, reasoning_effort, history, on_delta)
+        answer = model_answer or f"## 摘要\n{summary}\n\n## 来源\n{_source_markdown(hits)}"
+        return {"answer": answer, "intent": "summarize", "used_tools": ["search_knowledge", "summarize_content"], "sources": hits, "confidence": "supported" if hits else "insufficient", "answer_mode": "model" if model_answer else "local"}
 
     if any(key in lowered for key in ("任务", "todo", "待办", "未完成")):
         tasks = query_project_data(db, project_id)
@@ -212,7 +213,7 @@ def run_agent(db: Session, question: str, session_id: int | None = None, project
         answer = "## 未完成任务\n当前共有 **{}** 个未完成任务。\n\n## 任务列表\n{}".format(
             len(tasks), "\n".join(f"- **{task['title']}** · 优先级：{task['priority']}" for task in tasks) or "- 暂无未完成任务"
         )
-        return {"answer": answer, "intent": "project_data_query", "used_tools": ["query_project_data"], "sources": [], "confidence": "structured"}
+        return {"answer": answer, "intent": "project_data_query", "used_tools": ["query_project_data"], "sources": [], "confidence": "structured", "answer_mode": "structured"}
 
     if any(key in lowered for key in ("故障", "告警", "报错", "异常", "503", "500", "error")):
         incidents = query_incident_history(db, "", project_id)
@@ -221,7 +222,7 @@ def run_agent(db: Session, question: str, session_id: int | None = None, project
         steps = ["确认影响范围和最近一次发布", "检查服务日志与依赖健康状态", "根据引用的 Runbook 执行回滚或限流", "记录处理结果并关闭事件"]
         incident_lines = "\n".join(f"- **{item['title']}** · {item['service']} · 严重级别：{item['severity']}" for item in incidents) or "- 暂无未关闭故障记录"
         answer = "## 建议结论\n建议先按以下顺序排查，不直接执行生产变更。\n\n## 排查步骤\n" + "\n".join(f"{idx + 1}. {step}" for idx, step in enumerate(steps)) + f"\n\n## 当前未关闭故障\n{incident_lines}\n\n## 知识库依据\n{_source_markdown(hits)}"
-        return {"answer": answer, "intent": "incident_triage", "used_tools": ["query_incident_history", "search_knowledge"], "sources": hits, "confidence": "supported" if hits else "insufficient", "incidents": incidents}
+        return {"answer": answer, "intent": "incident_triage", "used_tools": ["query_incident_history", "search_knowledge"], "sources": hits, "confidence": "supported" if hits else "insufficient", "answer_mode": "structured", "incidents": incidents}
 
     hits = search(db, question, 4, project_id)
     output = {"hits": len(hits), "top_score": hits[0]["score"] if hits else 0}
@@ -229,8 +230,11 @@ def run_agent(db: Session, question: str, session_id: int | None = None, project
     if not hits or hits[0]["score"] < 0.08:
         answer = "## 结论\n当前知识库没有足够依据回答这个问题。\n\n## 下一步\n请先上传 README、架构文档或 Runbook，再重新提问。"
         confidence = "insufficient"
+        answer_mode = "local"
     else:
         context = "\n\n".join(f"[{hit['document_name']}] {hit['content']}" for hit in hits)
-        answer = _llm_answer(question, context, reasoning_effort, history, on_delta) or f"## 结论\n根据项目资料，最相关的内容来自 **{hits[0]['document_name']}**。\n\n## 依据\n{_source_markdown(hits)}\n\n## 下一步\n如果需要更具体的结论，请补充模块名、错误信息或运行环境。"
+        model_answer = _llm_answer(question, context, reasoning_effort, history, on_delta)
+        answer = model_answer or f"## 结论\n根据项目资料，最相关的内容来自 **{hits[0]['document_name']}**。\n\n## 依据\n{_source_markdown(hits)}\n\n## 下一步\n如果需要更具体的结论，请补充模块名、错误信息或运行环境。"
         confidence = "supported"
-    return {"answer": answer, "intent": "knowledge_qa", "used_tools": ["search_knowledge"], "sources": hits, "confidence": confidence}
+        answer_mode = "model" if model_answer else "local"
+    return {"answer": answer, "intent": "knowledge_qa", "used_tools": ["search_knowledge"], "sources": hits, "confidence": confidence, "answer_mode": answer_mode}

@@ -17,6 +17,7 @@
 | POST | `/api/sessions` | 创建对话会话 |
 | GET | `/api/sessions?project_id=1` | 获取某个工作区的会话列表 |
 | GET | `/api/sessions/{id}/messages` | 获取会话历史 |
+| DELETE | `/api/sessions/{id}` | 删除会话、消息及关联工具调用记录 |
 | POST | `/api/chat` | 调用 Project Atlas 智能助手 |
 | POST | `/api/chat/stream` | 获取 SSE 工具事件 |
 | DELETE | `/api/documents/{id}` | 删除文档、索引及不再使用的本地文件 |

@@ -46,6 +46,7 @@ class ChatResponse(BaseModel):
     used_tools: list[str]
     sources: list[dict]
     confidence: str
+    answer_mode: str = "local"
     session_id: int | None = None
 
 

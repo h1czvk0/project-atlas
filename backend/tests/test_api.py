@@ -77,6 +77,30 @@ def test_project_repository_url_can_be_added_later():
     assert response.json()["repo_url"] == "https://github.com/h1czvk0/project-atlas"
 
 
+def test_repository_url_change_resets_repository_context():
+    project = client.post("/api/projects", json={
+        "name": "Repository Reset Project",
+        "slug": f"repository-reset-{uuid4().hex[:8]}",
+        "repo_url": None,
+    }).json()
+    with SessionLocal() as db:
+        row = db.get(Project, project["id"])
+        row.repo_url = "https://github.com/example/old"
+        row.repo_status = "ready"
+        row.repo_last_commit = "abc123"
+        row.repo_indexed_files = 3
+        db.add(Document(name="old.py", file_type=".py", sha256=uuid4().hex, size_bytes=1, status="ready", source_type="repository_code", project_id=row.id))
+        db.commit()
+
+    response = client.patch(f"/api/projects/{project['id']}", json={"repo_url": None})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["repo_status"] == "not_imported"
+    assert payload["repo_last_commit"] is None
+    assert all(item["source_type"] != "repository_code" for item in client.get(f"/api/documents?project_id={project['id']}").json())
+    client.delete(f"/api/projects/{project['id']}")
+
+
 def test_system_status_does_not_expose_api_key():
     response = client.get("/api/system/status")
     assert response.status_code == 200
@@ -84,6 +108,23 @@ def test_system_status_does_not_expose_api_key():
     assert "llm_reachable" in response.json()
     assert response.json()["llm_reachable"] is None
     assert "llm_api_key" not in response.json()
+
+
+def test_session_can_be_deleted_and_metadata_is_compact():
+    project_id = client.get("/api/projects").json()[0]["id"]
+    response = client.post("/api/chat", json={
+        "question": "有哪些文档？",
+        "project_id": project_id,
+    })
+    assert response.status_code == 200
+    session_id = response.json()["session_id"]
+    messages = client.get(f"/api/sessions/{session_id}/messages").json()
+    metadata = messages[-1]["metadata_json"]
+    assert "answer" not in metadata
+    assert metadata["answer_mode"] == "structured"
+    deleted = client.delete(f"/api/sessions/{session_id}")
+    assert deleted.status_code == 200
+    assert client.get(f"/api/sessions/{session_id}/messages").status_code == 404
 
 
 def test_workspace_can_be_deleted_with_related_data():

@@ -33,6 +33,8 @@ Atlas 根据项目资料回答这些问题，并展示使用到的来源文档�
 - 通过只读工具查询项目任务和未关闭故障。
 - 通过 SSE 返回 Agent 工具调用事件。
 - 支持真实模型 Token 流式输出与同一工作区内的多轮上下文对话。
+- 支持浏览、恢复和删除历史对话，并标记回答来自模型、结构化工具或本地回退。
+- 更换仓库地址时自动清理旧仓库索引；同步 README 和 Issue 时按来源更新，避免重复资料。
 - 支持 SQLite 本地运行，也支持 Docker Compose + MySQL。
 
 ## 使用流程示例
@@ -125,6 +127,7 @@ WORKSPACE_DIR=E:/program/agent
 | GET | `/api/documents?project_id=1` | 获取某个项目的资料 |
 | POST | `/api/chat` | 向 Agent 提问 |
 | POST | `/api/chat/stream` | 获取 SSE 工具事件 |
+| DELETE | `/api/sessions/{id}` | 删除对话及其工具调用记录 |
 
 ## 系统架构
 

@@ -29,12 +29,17 @@ def chunk_text(text: str, size: int = 700, overlap: int = 100) -> list[str]:
     start = 0
     while start < len(cleaned):
         end = min(len(cleaned), start + size)
+        if end < len(cleaned):
+            boundary = cleaned.rfind("\n", start + int(size * 0.6), end)
+            if boundary > start:
+                end = boundary
         piece = cleaned[start:end].strip()
         if piece:
             chunks.append(piece)
         if end == len(cleaned):
             break
-        start = max(0, end - overlap)
+        next_start = max(0, end - overlap)
+        start = next_start if next_start > start else end
     return chunks
 
 
@@ -71,13 +76,31 @@ def search(db: Session, query: str, top_k: int = 4, project_id: int = 1) -> list
     qv = embedding(query)
     rows = db.query(DocumentChunk, Document).join(Document).filter(Document.status == "ready", Document.project_id == project_id).all()
     query_tokens = set(TOKEN_RE.findall(query.lower()))
-    def score_row(row):
-        lexical = len(query_tokens & set(TOKEN_RE.findall(row.content.lower()))) / max(len(query_tokens), 1)
-        return 0.7 * cosine(qv, row.embedding) + 0.3 * lexical
-    scored = sorted(((score_row(row), row, doc) for row, doc in rows), key=lambda item: item[0], reverse=True)
-    return [
-        {"chunk_id": row.chunk_id, "document_id": doc.id, "document_name": doc.name,
-         "content": row.content, "score": round(score, 4), "source_type": doc.source_type,
-         "source_url": doc.source_url}
-        for score, row, doc in scored[:top_k]
-    ]
+
+    def score_row(row, document):
+        content_tokens = set(TOKEN_RE.findall(row.content.lower()))
+        lexical = len(query_tokens & content_tokens) / max(len(query_tokens), 1)
+        filename_tokens = set(TOKEN_RE.findall(document.name.lower()))
+        filename_match = len(query_tokens & filename_tokens) / max(len(query_tokens), 1)
+        return 0.62 * cosine(qv, row.embedding) + 0.3 * lexical + 0.08 * filename_match
+
+    scored = sorted(((score_row(row, doc), row, doc) for row, doc in rows), key=lambda item: item[0], reverse=True)
+    selected = []
+    per_document: dict[int, int] = {}
+    for score, row, doc in scored:
+        if per_document.get(doc.id, 0) >= 2:
+            continue
+        selected.append({
+            "chunk_id": row.chunk_id,
+            "document_id": doc.id,
+            "document_name": doc.name,
+            "section_title": row.section_title,
+            "content": row.content,
+            "score": round(score, 4),
+            "source_type": doc.source_type,
+            "source_url": doc.source_url,
+        })
+        per_document[doc.id] = per_document.get(doc.id, 0) + 1
+        if len(selected) >= top_k:
+            break
+    return selected

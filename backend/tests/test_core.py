@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from app.rag import chunk_text, cosine, embedding
+from app.rag import chunk_text, cosine, embedding, index_document, search
+from app.models import Document, Project
+from app.db import SessionLocal
 from app.agent import _llm_answer, _llm_payload, _source_excerpt, _source_markdown, summarize_content
 import pytest
 from app.github_sync import parse_repo_url
@@ -14,9 +16,37 @@ def test_chunk_text_has_overlap_and_content():
     assert all(chunks)
 
 
+def test_chunk_text_prefers_line_boundaries():
+    text = ("第一段内容。" * 10) + "\n" + ("第二段内容。" * 20) + "\n第三段内容。"
+    chunks = chunk_text(text, size=80, overlap=10)
+    assert chunks[0].endswith("第一段内容。")
+    assert len(chunks[0]) < 80
+
+
 def test_embedding_is_normalized():
     vector = embedding("FastAPI RAG Agent")
     assert round(cosine(vector, vector), 5) == 1
+
+
+def test_search_diversifies_documents():
+    with SessionLocal() as db:
+        project = Project(name="检索多样性", slug=f"search-diversity-{id(db)}")
+        db.add(project)
+        db.commit()
+        docs = []
+        for index in range(3):
+            doc = Document(name=f"payment-{index}.md", file_type=".md", sha256=f"diversity-{id(db)}-{index}", size_bytes=10, project_id=project.id)
+            db.add(doc)
+            db.commit()
+            index_document(db, doc, ("payment timeout database connection\n" * 80) + f"doc {index}")
+            docs.append(doc)
+        db.commit()
+        hits = search(db, "payment timeout", top_k=4, project_id=project.id)
+        assert len({hit["document_id"] for hit in hits}) >= 2
+        for doc in docs:
+            db.delete(doc)
+        db.delete(project)
+        db.commit()
 
 
 def test_project_digest_keeps_legacy_candidate_for_existing_data():

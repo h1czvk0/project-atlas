@@ -94,6 +94,20 @@ def list_projects(db: Session = Depends(get_db)):
     return db.query(Project).order_by(Project.created_at.asc()).all()
 
 
+def _delete_source_documents(db: Session, project_id: int, patterns: tuple[str, ...]) -> list[str | None]:
+    documents = []
+    for pattern in patterns:
+        documents.extend(db.query(Document).filter(
+            Document.project_id == project_id,
+            Document.source_type.like(pattern),
+        ).all())
+    unique_documents = {document.id: document for document in documents}.values()
+    storage_paths = [document.storage_path for document in unique_documents]
+    for document in unique_documents:
+        db.delete(document)
+    return storage_paths
+
+
 @app.post("/api/projects", response_model=ProjectOut, status_code=201)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
     if db.query(Project).filter_by(slug=payload.slug).first():
@@ -116,10 +130,35 @@ def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depend
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    if "repo_url" in changes:
+        changes["repo_url"] = changes["repo_url"].strip() if changes["repo_url"] else None
+    repository_changed = "repo_url" in changes and changes["repo_url"] != project.repo_url
+    if repository_changed and repository_import_running(project_id):
+        raise HTTPException(409, "仓库正在导入，完成后才能更换仓库地址")
+
+    old_repository_path = Path(project.repo_local_path).resolve() if repository_changed and project.repo_local_path else None
+    old_storage_paths = []
+    if repository_changed:
+        old_storage_paths = _delete_source_documents(db, project_id, ("repository_%", "github_%"))
+        project.repo_status = "not_imported"
+        project.repo_local_path = None
+        project.repo_last_commit = None
+        project.repo_indexed_files = 0
+        project.repo_progress = 0
+        project.repo_stage = "等待导入"
+        project.repo_error = None
+        project.repo_last_synced_at = None
+    for field, value in changes.items():
         setattr(project, field, value.strip() if isinstance(value, str) else value)
     db.commit()
     db.refresh(project)
+    cleanup_unreferenced_files(db, old_storage_paths)
+    if old_repository_path:
+        workspace_root = repository_root()
+        if workspace_root in old_repository_path.parents and old_repository_path.is_dir():
+            from .repository_analyzer import _remove_tree
+            _remove_tree(old_repository_path)
     return project
 
 
@@ -241,19 +280,41 @@ def _index_remote_items(db: Session, project_id: int, items: list[dict]) -> dict
     for item in items:
         raw = item["content"].encode("utf-8")
         digest, legacy_digest = content_digest_candidates(project_id, raw)
-        if db.query(Document).filter(
+        existing = None
+        if item.get("url"):
+            existing = db.query(Document).filter(
+                Document.project_id == project_id,
+                Document.source_type == item["kind"],
+                Document.source_url == item["url"],
+            ).first()
+        duplicate = db.query(Document).filter(
             Document.project_id == project_id,
             Document.sha256.in_([digest, legacy_digest]),
-        ).first():
+        ).first()
+        if (existing and existing.sha256 in {digest, legacy_digest}) or (not existing and duplicate):
             skipped += 1
             continue
         target = write_project_file(project_id, digest, ".md", raw)
-        doc = Document(name=item["name"], file_type=".md", sha256=digest, size_bytes=len(raw), storage_path=str(target), project_id=project_id, source_type=item["kind"], source_url=item.get("url"))
-        db.add(doc)
+        old_storage_path = existing.storage_path if existing else None
+        if existing:
+            for chunk in list(existing.chunks):
+                db.delete(chunk)
+            existing.name = item["name"]
+            existing.sha256 = digest
+            existing.size_bytes = len(raw)
+            existing.storage_path = str(target)
+            existing.status = "processing"
+            existing.error_message = None
+            doc = existing
+        else:
+            doc = Document(name=item["name"], file_type=".md", sha256=digest, size_bytes=len(raw), storage_path=str(target), project_id=project_id, source_type=item["kind"], source_url=item.get("url"))
+            db.add(doc)
         db.commit()
         db.refresh(doc)
         count = index_document(db, doc, item["content"])
         db.commit()
+        if old_storage_path and old_storage_path != str(target):
+            cleanup_unreferenced_files(db, [old_storage_path])
         indexed += 1
         documents.append({"id": doc.id, "name": doc.name, "chunk_count": count, "source_url": item.get("url")})
     return {"status": "completed", "indexed": indexed, "skipped": skipped, "documents": documents}
@@ -385,6 +446,37 @@ def session_messages(session_id: int, db: Session = Depends(get_db)):
     return db.query(Message).filter_by(session_id=session_id).order_by(Message.created_at.asc()).all()
 
 
+@app.delete("/api/sessions/{session_id}")
+def delete_session(session_id: int, db: Session = Depends(get_db)):
+    session = db.get(ChatSession, session_id)
+    if not session:
+        raise HTTPException(404, "会话不存在")
+    db.query(ToolCall).filter(ToolCall.session_id == session_id).delete(synchronize_session=False)
+    db.delete(session)
+    db.commit()
+    return {"deleted": session_id}
+
+
+def _compact_message_metadata(result: dict) -> dict:
+    return {
+        "intent": result.get("intent"),
+        "used_tools": result.get("used_tools", []),
+        "confidence": result.get("confidence"),
+        "answer_mode": result.get("answer_mode", "local"),
+        "sources": [
+            {
+                "document_id": source.get("document_id"),
+                "document_name": source.get("document_name"),
+                "section_title": source.get("section_title"),
+                "source_type": source.get("source_type"),
+                "source_url": source.get("source_url"),
+                "score": source.get("score"),
+            }
+            for source in result.get("sources", [])
+        ],
+    }
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, db: Session = Depends(get_db)):
     project_id = payload.project_id or 1
@@ -403,7 +495,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
     db.add(Message(session_id=session.id, role="user", content=payload.question))
     result = run_agent(db, payload.question, session.id, project_id, payload.reasoning_effort, history)
     result["session_id"] = session.id
-    db.add(Message(session_id=session.id, role="assistant", content=result["answer"], metadata_json=result))
+    db.add(Message(session_id=session.id, role="assistant", content=result["answer"], metadata_json=_compact_message_metadata(result)))
     db.commit()
     return result
 
@@ -438,7 +530,7 @@ def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)):
                         lambda content: queue.put(("delta", {"content": content})),
                     )
                     result["session_id"] = session_id
-                    worker_db.add(Message(session_id=session_id, role="assistant", content=result["answer"], metadata_json=result))
+                    worker_db.add(Message(session_id=session_id, role="assistant", content=result["answer"], metadata_json=_compact_message_metadata(result)))
                     worker_db.commit()
                     queue.put(("answer", result))
             except Exception as exc:
