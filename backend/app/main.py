@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from .agent import check_llm_connection, run_agent
 from .config import settings
-from .db import Base, engine, get_db
+from .db import Base, SessionLocal, engine, get_db
 from .github_sync import fetch_context
 from .migrations import migrate_legacy_schema
 from .models import ChatSession, Document, Incident, Message, Project, ProjectTask, ToolCall
