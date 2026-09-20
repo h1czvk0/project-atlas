@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+data/*.db
+data/uploads/
+backend/data/*.db
+backend/data/uploads/
+node_modules/
+dist/
+.idea/
+.vscode/

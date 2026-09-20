@@ -1,0 +1,5 @@
+{"question":"项目使用哪些服务启动？","expected_intent":"knowledge_qa","expected_tools":["search_knowledge"]}
+{"question":"总结 RAG 流程","expected_intent":"summarize","expected_tools":["search_knowledge","summarize_content"]}
+{"question":"有哪些未完成任务？","expected_intent":"project_data_query","expected_tools":["query_project_data"]}
+{"question":"当前有哪些文档？","expected_intent":"document_query","expected_tools":["query_document"]}
+{"question":"支付服务 503 怎么排查？","expected_intent":"incident_triage","expected_tools":["query_incident_history","search_knowledge"]}
