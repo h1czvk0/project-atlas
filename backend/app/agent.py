@@ -98,6 +98,29 @@ def _llm_answer(question: str, context: str) -> str | None:
         return None
 
 
+def check_llm_connection() -> dict:
+    if not settings.llm_base_url or not settings.llm_api_key or not settings.llm_model:
+        return {"configured": False, "reachable": False, "model": None, "message": "未配置大模型"}
+    url = settings.llm_base_url.rstrip("/") + "/chat/completions"
+    try:
+        response = httpx.post(
+            url,
+            headers={"Authorization": f"Bearer {settings.llm_api_key}"},
+            json={
+                "model": settings.llm_model,
+                "messages": [{"role": "user", "content": "Reply with OK."}],
+                "max_tokens": 1,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        return {"configured": True, "reachable": True, "model": settings.llm_model, "message": "连接正常"}
+    except httpx.HTTPError as exc:
+        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+        message = f"连接失败（HTTP {status}）" if status else "连接失败"
+        return {"configured": True, "reachable": False, "model": settings.llm_model, "message": message}
+
+
 def run_agent(db: Session, question: str, session_id: int | None = None, project_id: int = 1) -> dict:
     lowered = question.lower()
     if any(key in lowered for key in ("有哪些文档", "文档列表", "文件列表")):

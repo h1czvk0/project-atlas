@@ -61,4 +61,5 @@ def test_system_status_does_not_expose_api_key():
     response = client.get("/api/system/status")
     assert response.status_code == 200
     assert "llm_configured" in response.json()
+    assert "llm_reachable" in response.json()
     assert "llm_api_key" not in response.json()

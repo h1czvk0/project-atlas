@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from .agent import run_agent
+from .agent import check_llm_connection, run_agent
 from .config import settings
 from .db import Base, engine, get_db
 from .github_sync import fetch_context
@@ -52,9 +52,12 @@ def ready(db: Session = Depends(get_db)):
 
 @app.get("/api/system/status")
 def system_status():
+    llm = check_llm_connection()
     return {
-        "llm_configured": bool(settings.llm_base_url and settings.llm_api_key and settings.llm_model),
-        "llm_model": settings.llm_model if settings.llm_base_url and settings.llm_api_key else None,
+        "llm_configured": llm["configured"],
+        "llm_reachable": llm["reachable"],
+        "llm_model": llm["model"],
+        "llm_message": llm["message"],
         "github_token_configured": bool(settings.github_token),
     }
 
