@@ -11,6 +11,11 @@ _running: set[int] = set()
 _lock = Lock()
 
 
+def repository_import_running(project_id: int) -> bool:
+    with _lock:
+        return project_id in _running
+
+
 def _apply(project: Project, values: dict) -> None:
     for field, value in values.items():
         setattr(project, field, value)

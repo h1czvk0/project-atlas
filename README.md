@@ -58,6 +58,8 @@ Atlas 返回结构化上手路径
 Copy-Item .env.example .env
 ```
 
+这条命令只用于首次初始化：它把配置模板复制为本地 `.env`。如果 `.env` 已存在并且已经填写 API Key，不要再次执行，否则 PowerShell 会用模板覆盖现有配置。`.env` 已被 Git 忽略，不会提交到仓库。
+
 如果 Docker Desktop 正在运行，可以直接启动完整服务：
 
 ```powershell
@@ -112,6 +114,7 @@ REPOSITORY_DIR=./data/repositories
 |---|---|---|
 | GET | `/api/projects` | 获取项目 Workspace 列表 |
 | POST | `/api/projects` | 创建项目 Workspace |
+| DELETE | `/api/projects/{id}` | 删除 Workspace 及其文档、对话、索引和本地仓库快照 |
 | POST | `/api/projects/{id}/sync-readme` | 导入公开 GitHub README |
 | POST | `/api/projects/{id}/sync-context` | 导入公开 GitHub README、Commit 和 Issue |
 | POST | `/api/projects/{id}/import-repository` | 克隆并索引完整仓库上下文 |

@@ -17,6 +17,9 @@ header { display: flex; justify-content: space-between; align-items: flex-start;
 .sync:disabled { cursor: wait; opacity: .65; }
 .secondary-action { padding: 8px 12px; border: 1px solid #cad8ea; background: #fff; color: #416b9f; font-size: 12px; }
 .secondary-action:disabled { cursor: wait; opacity: .65; }
+.danger-action { padding: 8px 12px; border: 1px solid #efc9ce; background: #fff; color: #b74755; font-size: 12px; }
+.danger-action:hover { background: #fff5f6; }
+.danger-action:disabled { cursor: not-allowed; opacity: .5; }
 .eyebrow { color: #5578b8; font-size: 11px; font-weight: 700; letter-spacing: 1.8px; }
 h1 { margin: 9px 0 5px; color: #172033; font-size: 46px; letter-spacing: -1.8px; line-height: 1.1; }
 h1 em { color: #3976c9; font-style: normal; }

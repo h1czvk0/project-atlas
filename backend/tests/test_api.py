@@ -64,3 +64,29 @@ def test_system_status_does_not_expose_api_key():
     assert "llm_reachable" in response.json()
     assert response.json()["llm_reachable"] is None
     assert "llm_api_key" not in response.json()
+
+
+def test_workspace_can_be_deleted_with_related_data():
+    project = client.post("/api/projects", json={
+        "name": "Delete Test Project",
+        "slug": "delete-test-project",
+        "description": "删除测试",
+        "repo_url": None,
+    })
+    if project.status_code == 409:
+        project_id = next(item["id"] for item in client.get("/api/projects").json() if item["slug"] == "delete-test-project")
+    else:
+        assert project.status_code == 201
+        project_id = project.json()["id"]
+
+    upload = client.post(
+        "/api/documents/upload",
+        data={"project_id": project_id},
+        files={"file": ("delete-test.md", b"temporary workspace content", "text/markdown")},
+    )
+    assert upload.status_code in (200, 409)
+    response = client.delete(f"/api/projects/{project_id}")
+    assert response.status_code == 200
+    assert response.json() == {"deleted": project_id}
+    assert all(item["id"] != project_id for item in client.get("/api/projects").json())
+    assert client.get(f"/api/documents?project_id={project_id}").json() == []

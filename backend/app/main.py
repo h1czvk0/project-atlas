@@ -12,10 +12,10 @@ from .config import settings
 from .db import Base, engine, get_db
 from .github_sync import fetch_context
 from .migrations import migrate_legacy_schema
-from .models import ChatSession, Document, Incident, Message, Project, ProjectTask
+from .models import ChatSession, Document, Incident, Message, Project, ProjectTask, ToolCall
 from .rag import index_document, parse_text
 from .repository_analyzer import RepositoryImportError, build_repository_items, copy_local_repository
-from .repository_jobs import start_repository_import
+from .repository_jobs import repository_import_running, start_repository_import
 from .schemas import ChatRequest, ChatResponse, ProjectCreate, ProjectOut, ProjectUpdate, SessionCreate, SessionOut
 
 Base.metadata.create_all(bind=engine)
@@ -101,6 +101,44 @@ def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depend
     db.commit()
     db.refresh(project)
     return project
+
+
+@app.delete("/api/projects/{project_id}")
+def delete_project(project_id: int, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if repository_import_running(project_id):
+        raise HTTPException(409, "仓库正在导入，请等待完成后再删除工作区")
+
+    documents = db.query(Document).filter(Document.project_id == project_id).all()
+    upload_root = Path(settings.upload_dir).resolve()
+    for document in documents:
+        if not document.storage_path:
+            continue
+        path = Path(document.storage_path).resolve()
+        if path.is_file() and path.parent == upload_root:
+            path.unlink(missing_ok=True)
+
+    sessions = db.query(ChatSession).filter(ChatSession.project_id == project_id).all()
+    session_ids = [session.id for session in sessions]
+    if session_ids:
+        db.query(ToolCall).filter(ToolCall.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(Message).filter(Message.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(ChatSession).filter(ChatSession.id.in_(session_ids)).delete(synchronize_session=False)
+    db.query(Incident).filter(Incident.project_id == project_id).delete(synchronize_session=False)
+    db.query(ProjectTask).filter(ProjectTask.project_id == project_id).delete(synchronize_session=False)
+    for document in documents:
+        db.delete(document)
+    db.delete(project)
+    db.commit()
+
+    repository_root = Path(settings.repository_dir).resolve()
+    repository_path = (repository_root / f"project-{project_id}").resolve()
+    if repository_root in repository_path.parents and repository_path.is_dir():
+        from .repository_analyzer import _remove_tree
+        _remove_tree(repository_path)
+    return {"deleted": project_id}
 
 
 @app.get("/api/documents")
