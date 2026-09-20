@@ -1,4 +1,5 @@
 import httpx
+import re
 from sqlalchemy.orm import Session
 from .config import settings
 from .models import Document, Incident, ProjectTask, ToolCall
@@ -19,6 +20,31 @@ def summarize_content(text: str) -> str:
     return "；".join(lines[:5])[:600] if lines else "没有可总结的内容。"
 
 
+def _source_excerpt(text: str, limit: int = 220) -> str:
+    lines = []
+    for raw_line in text.splitlines():
+        line = re.sub(r"^\s*(?:#{1,6}|[-*+]|>)\s*", "", raw_line).strip()
+        if line:
+            lines.append(line)
+
+    if not lines:
+        return "暂无可展示的摘要。"
+
+    selected = []
+    for line in lines:
+        candidate = "；".join([*selected, line])
+        if len(candidate) > limit:
+            break
+        selected.append(line)
+
+    if not selected:
+        shortened = lines[0][:limit].rstrip("，,；;：:、 ")
+        return f"{shortened}……" if len(lines[0]) > limit else shortened
+
+    excerpt = "；".join(selected)
+    return f"{excerpt}……" if len(selected) < len(lines) else excerpt
+
+
 def _source_markdown(hits: list[dict]) -> str:
     if not hits:
         return "- 暂无匹配的项目资料。"
@@ -26,7 +52,7 @@ def _source_markdown(hits: list[dict]) -> str:
     for hit in hits[:3]:
         name = hit["document_name"]
         label = f"[{name}]({hit['source_url']})" if hit.get("source_url") else f"**{name}**"
-        lines.append(f"- {label}：{hit['content'].strip()[:180]}")
+        lines.append(f"- {label}：{_source_excerpt(hit['content'])}")
     return "\n".join(lines)
 
 
@@ -113,7 +139,6 @@ def run_agent(db: Session, question: str, session_id: int | None = None, project
         hits = search(db, question, 4, project_id)
         _record_tool(db, "query_incident_history", {"status": "open"}, {"incidents": incidents}, session_id)
         steps = ["确认影响范围和最近一次发布", "检查服务日志与依赖健康状态", "根据引用的 Runbook 执行回滚或限流", "记录处理结果并关闭事件"]
-        evidence = "\n".join(f"《{hit['document_name']}》：{hit['content'][:160]}" for hit in hits[:2]) or "暂无匹配 Runbook"
         incident_lines = "\n".join(f"- **{item['title']}** · {item['service']} · 严重级别：{item['severity']}" for item in incidents) or "- 暂无未关闭故障记录"
         answer = "## 建议结论\n建议先按以下顺序排查，不直接执行生产变更。\n\n## 排查步骤\n" + "\n".join(f"{idx + 1}. {step}" for idx, step in enumerate(steps)) + f"\n\n## 当前未关闭故障\n{incident_lines}\n\n## 知识库依据\n{_source_markdown(hits)}"
         return {"answer": answer, "intent": "incident_triage", "used_tools": ["query_incident_history", "search_knowledge"], "sources": hits, "confidence": "supported" if hits else "insufficient", "incidents": incidents}
