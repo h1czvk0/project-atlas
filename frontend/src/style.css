@@ -28,9 +28,9 @@ header p { margin: 0; color: #718096; font-size: 15px; }
 .model-status { padding: 8px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
 .model-status.connected { border: 1px solid #c8ddf5; background: #f1f7ff; color: #356da9; }
 .model-status.fallback { border: 1px solid #e5dfcf; background: #fffaf0; color: #8b6a28; }
-.grid { display: grid; grid-template-columns: 310px 1fr; gap: 20px; }
+.grid { display: grid; grid-template-columns: 310px minmax(0, 1fr); gap: 20px; align-items: stretch; }
 .panel { border: 1px solid #e1e7f0; border-radius: 16px; background: #fff; box-shadow: 0 12px 35px rgba(37, 58, 89, .07); }
-.docs { padding: 20px; }
+.docs { display: flex; height: min(720px, calc(100vh - 210px)); min-height: 560px; flex-direction: column; overflow: hidden; padding: 20px; }
 .workspace-setup { margin-bottom: 14px; padding: 10px 12px; border: 1px solid #e2e8f1; border-radius: 10px; background: #fafcff; }
 .repo-summary { display: flex; flex-direction: column; gap: 3px; margin-bottom: 12px; padding: 10px 12px; border-left: 3px solid #3976c9; background: #f4f8fd; color: #334158; font-size: 12px; }
 .repo-url { display: flex; gap: 6px; margin-top: 6px; }
@@ -43,7 +43,7 @@ header p { margin: 0; color: #718096; font-size: 15px; }
 .workspace-setup summary { color: #4c6f9f; font-size: 12px; font-weight: 700; cursor: pointer; }
 .workspace-setup input { width: 100%; margin-top: 8px; padding: 8px 9px; border: 1px solid #dce4ef; border-radius: 7px; outline: none; color: #334158; }
 .workspace-setup button { width: 100%; margin-top: 8px; padding: 8px; font-size: 12px; }
-.chat { display: flex; min-height: 650px; flex-direction: column; padding: 24px; }
+.chat { display: flex; height: min(720px, calc(100vh - 210px)); min-height: 560px; flex-direction: column; overflow: hidden; padding: 24px; }
 .panel-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .panel-title h2 { margin: 0; color: #25324a; font-size: 16px; }
 .panel-title small, .panel-title span, small { color: #77859a; font-size: 12px; }
@@ -51,6 +51,14 @@ header p { margin: 0; color: #718096; font-size: 15px; }
 .upload:hover { border-color: #3976c9; background: #f1f7ff; }
 .upload input { display: none; }
 .upload small { color: #8896a9; }
+.document-list { min-height: 0; overflow-y: auto; padding-right: 5px; scrollbar-color: #c8d4e4 transparent; scrollbar-width: thin; }
+.document-group { border-top: 1px solid #edf0f5; }
+.document-group:first-child { border-top: 0; }
+.document-group > summary { display: flex; align-items: center; gap: 8px; padding: 11px 2px; color: #4f6078; font-size: 12px; font-weight: 700; cursor: pointer; list-style: none; }
+.document-group > summary::-webkit-details-marker { display: none; }
+.document-group > summary::before { content: "›"; color: #7690b3; font-size: 18px; line-height: 1; transform: rotate(0deg); transition: transform .16s ease; }
+.document-group[open] > summary::before { transform: rotate(90deg); }
+.document-group > summary b { margin-left: auto; min-width: 24px; padding: 2px 6px; border-radius: 8px; background: #eef3f9; color: #60738e; font-size: 10px; text-align: center; }
 .doc { display: flex; gap: 10px; padding: 13px 0; border-bottom: 1px solid #edf0f5; }
 .doc b { display: block; max-width: 215px; overflow: hidden; color: #2b3850; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .doc small { display: block; margin-top: 5px; }
