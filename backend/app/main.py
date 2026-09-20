@@ -521,6 +521,7 @@ def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)):
         def worker():
             try:
                 with SessionLocal() as worker_db:
+                    queue.put(("stage", {"key": "context", "label": "正在读取会话上下文", "detail": "载入当前 Workspace 和最近对话"}))
                     history_rows = worker_db.query(Message).filter_by(session_id=session_id).order_by(Message.created_at.desc()).limit(6).all()
                     history = [{"role": row.role, "content": row.content} for row in reversed(history_rows)]
                     worker_db.add(Message(session_id=session_id, role="user", content=payload.question))
@@ -528,6 +529,7 @@ def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)):
                         worker_db, payload.question, session_id, project_id,
                         payload.reasoning_effort, history,
                         lambda content: queue.put(("delta", {"content": content})),
+                        lambda stage: queue.put(("stage", stage)),
                     )
                     result["session_id"] = session_id
                     worker_db.add(Message(session_id=session_id, role="assistant", content=result["answer"], metadata_json=_compact_message_metadata(result)))
@@ -548,8 +550,6 @@ def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)):
             if event == "delta":
                 streamed = True
             if event == "answer":
-                for tool in data["used_tools"]:
-                    yield f"event: tool\ndata: {json.dumps({'tool': tool}, ensure_ascii=False)}\n\n"
                 if not streamed:
                     yield f"event: delta\ndata: {json.dumps({'content': data['answer']}, ensure_ascii=False)}\n\n"
             yield f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"

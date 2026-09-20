@@ -35,6 +35,9 @@ def test_project_workspace_document_and_stream_flow():
 
     stream = client.post("/api/chat/stream", json={"question": "项目如何启动？", "project_id": project_id})
     assert stream.status_code == 200
+    assert "event: stage" in stream.text
+    assert "正在读取会话上下文" in stream.text
+    assert "正在检索项目知识" in stream.text
     assert "event: delta" in stream.text
     assert "event: answer" in stream.text
     status_payload = next(
